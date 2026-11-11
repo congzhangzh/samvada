@@ -75,7 +75,9 @@ def engine_where(engine: str, env: Mapping[str, str] = os.environ) -> str:
 def _run(cmd: list[str], *, cwd: Path | None, env: Mapping[str, str], stdin: str | None,
          debug: bool) -> bool:
     try:
-        r = subprocess.run(cmd, cwd=cwd, env=dict(env), input=stdin, text=True,
+        # UTF-8 both ways, whatever the locale: Windows would send Chinese text as cp1252
+        r = subprocess.run(cmd, cwd=cwd, env={**env, "PYTHONUTF8": "1"}, input=stdin,
+                           encoding="utf-8", errors="replace",
                            stdout=None if debug else subprocess.DEVNULL,
                            stderr=None if debug else subprocess.DEVNULL, timeout=TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as e:
