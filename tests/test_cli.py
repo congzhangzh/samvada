@@ -153,3 +153,24 @@ def test_migration_copies_speak_state_once(env):
     (legacy / "langs").write_text("en off\n")  # later changes to speak are not followed
     env.run("speak", *FOUR, SAMVADA="on")
     assert env.played() == ["en", "zh", "fr"]
+
+
+def test_piper_plus_cache_off_only_in_a_read_only_voices_folder(tmp_path, monkeypatch):
+    # piper-plus writes <model>.cpu.opt.onnx beside the model; on a read-only folder the run
+    # failed (20261111.3rc2, the bundle mounted :ro in its container test)
+    from samvada import engines
+    seen = []
+    monkeypatch.setattr(engines, "engine_cmd", lambda e, env=os.environ: (["piper-plus"], {}))
+    monkeypatch.setattr(engines, "_run", lambda cmd, *, cwd, env, stdin, debug: seen.append(env) or False)
+    monkeypatch.delenv("PIPER_DISABLE_CACHE", raising=False)
+    voice = engines.Voice("ja", "piper-plus", "m.onnx", "")
+    home = tmp_path / "voices"
+    home.mkdir()
+    engines.offline(voice, "テスト", tmp_path / "out.wav", home)
+    home.chmod(0o555)
+    try:
+        engines.offline(voice, "テスト", tmp_path / "out.wav", home)
+    finally:
+        home.chmod(0o755)
+    assert "PIPER_DISABLE_CACHE" not in seen[0]
+    assert seen[1]["PIPER_DISABLE_CACHE"] == "1"

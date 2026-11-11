@@ -104,6 +104,10 @@ def offline(voice: Voice, text: str, out: Path, home: Path, debug: bool = False)
         env["HF_HOME"] = str(home / "hf")
     if (home / "nltk_data").is_dir():  # the ja pack's NLTK data
         env["NLTK_DATA"] = str(home / "nltk_data")
+    if voice.engine == "piper-plus" and not os.access(home, os.W_OK):
+        # piper-plus saves an optimized copy beside the model on its first load
+        # (<model>.cpu.opt.onnx) and fails when it cannot: a bundle on a read-only mount
+        env.setdefault("PIPER_DISABLE_CACHE", "1")
     if voice.engine == "piper":
         cmd, stdin = base + ["-m", voice.model, "-f", str(out)], text + "\n"
     elif voice.engine == "piper-plus":
