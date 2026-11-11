@@ -28,7 +28,7 @@ def session_key(env: Mapping[str, str] = os.environ) -> str | None:
         return "pys-w" + env["PYS_WINDOW"]
     try:
         return "tty" + os.ttyname(0).replace("/", "-")
-    except OSError:
+    except (OSError, AttributeError):  # no tty, or Windows (no os.ttyname)
         return None
 
 

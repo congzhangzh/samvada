@@ -41,6 +41,10 @@ in either scope silences; for languages and the online mode, the session wins ov
 While muted, keep the corrections and the table; only the voice stops. Do not play any other
 sound (no test audio, no clients started with sound).
 
+**Working from another machine over plain ssh**: this desk's input counter does not move, so
+the voice may play to an empty room. Say so once, or run `samvada mute "on another machine"`
+(and `samvada unmute` when the owner is back at the desk).
+
 `samvada status` says where the voice goes now and why, which languages are on, the online
 mode, and the session key (the Claude Code session id, kept across a resume; else the pys
 window; else the tty; or `$SAMVADA_SESSION`).
