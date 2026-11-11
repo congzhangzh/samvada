@@ -5,7 +5,8 @@
 #   build     the wheel and the sdist; on a tag, the tag must equal the package version
 #   install   a clean install of the built wheel, as a user does it
 #   pypi      on a tag only: PyPI through Trusted Publishing (environment pypi, no token)
-#   github    on a tag only: a GitHub release with the same files
+#   bundle    standalone bundles built and tested on each system (Windows ARM: the x64 one)
+#   github    on a tag only: a GitHub release with the wheel, the sdist and the bundles
 name: release
 
 on:
@@ -68,6 +69,58 @@ jobs:
           SAMVADA=off samvada speak en "hello"
           samvada status
 
+  bundle:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, plat: linux-x86_64, test: --test }
+          - { os: ubuntu-24.04-arm, plat: linux-arm64, test: --test }
+          - { os: macos-15, plat: macos-arm64, test: --test-local }
+          - { os: windows-2025, plat: windows-x86_64, test: --test-local }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # the runner context exists only inside steps, so the build folder is set here
+      - run: echo "SAMVADA_BUILD_DIR=$RUNNER_TEMP/samvada-build" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/samvada-build/download-cache
+          key: voices-${{ hashFiles('src/samvada/voices.lock') }}
+      - run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+          uv run --python 3.12 python release/bundle.py "$version" ${{ matrix.test }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.plat }}
+          path: ${{ runner.temp }}/samvada-build/bundles/samvada-*
+          compression-level: 0
+
+  # Windows on ARM: the x64 bundle under the system's x64 emulation (piper-tts has no arm64
+  # wheel), on a real arm64 runner, network cut by proxy as on the other desktops
+  bundle-windows-arm64:
+    needs: bundle
+    runs-on: windows-11-arm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle-windows-x86_64
+          path: bundle
+      - run: |
+          echo "runner: $PROCESSOR_ARCHITECTURE"
+          uv run --python 3.12 python release/bundle.py --test-only bundle/samvada-*.zip --local \
+            --work "$RUNNER_TEMP/samvada-test"
+
   pypi:
     needs: [build, install]
     if: github.ref_type == 'tag'
@@ -87,7 +140,7 @@ jobs:
           skip-existing: true
 
   github:
-    needs: [build, pypi]
+    needs: [build, pypi, bundle, bundle-windows-arm64]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -97,9 +150,24 @@ jobs:
         with:
           name: dist
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
       - env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
+          cat > notes.md <<EOF
+          pip install samvada==$VERSION   (then: samvada voices add en zh)
+
+          Standalone bundles: their own Python, engine and the English and Chinese voices; no
+          network needed. Unpack, then run bin/samvada (Windows: bin\\samvada.cmd).
+          linux-x86_64, linux-arm64, macos-arm64 (macOS 14+), windows-x86_64 (also for
+          Windows on ARM, tested there under x64 emulation). VOICES.md inside lists each voice's
+          source; each voice keeps its own license.
+          EOF
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --title "samvada ${{ needs.build.outputs.version }}" \
-            --notes "pip install samvada==${{ needs.build.outputs.version }}" dist/*
+            --title "samvada $VERSION" --notes-file notes.md dist/*
