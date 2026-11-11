@@ -235,3 +235,10 @@ def test_save_writes_clips_and_skips_presence(env, tmp_path):
     assert r.returncode == 0, r.stderr
     assert sorted(p.name for p in out.iterdir()) == ["1-en.wav", "2-zh.wav"]
     assert not [l for l in env.lines() if l.startswith("play")]
+
+
+def test_a_narrow_console_does_not_crash_the_install(env, hub):
+    """Windows pipes are often cp1252: no "←", no Chinese. Seen on the windows-2025 runner."""
+    r = env.run("voices", "add", "en", "--engine", "never", PYTHONIOENCODING="cp1252")
+    assert r.returncode == 0, r.stderr
+    assert "Traceback" not in r.stderr and (hub.own / "en_US-lessac-high.onnx").is_file()

@@ -17,6 +17,9 @@ send, before any other work:
    - Spoken text carries no symbols, code, paths or formulas.
    - When `samvada` stays silent it says why and exits 0: never retry, never play sound
      another way.
+4. **A message that arrives while you work** gets the same: its corrections and table are
+   the next text you print, a short opening call ("you also want …; I will …"), and it is
+   folded into the closing.
 
 Read the `samvada` skill for anything else: mute, scopes, languages, the online mode, a
 chat-bridge session, failures.
