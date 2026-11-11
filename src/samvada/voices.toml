@@ -1,0 +1,29 @@
+# The voice map: one table per language, in the order `samvada status` lists them.
+#   engine   the offline engine: piper | piper-plus
+#   model    the model file, in the voices folder (`samvada status` shows which folder)
+#   online   the edge-tts voice, used only when the online mode allows it
+#   env      extra environment for the offline engine
+# A language whose model file is missing has no voice pack: it is skipped (offline), or
+# spoken online when the online mode allows it.
+
+[en]
+engine = "piper"
+model = "en_US-lessac-high.onnx"
+online = "en-US-AvaMultilingualNeural"
+
+[zh]
+engine = "piper"
+model = "zh_CN-xiao_ya-medium.onnx"
+online = "zh-CN-XiaoxiaoNeural"
+# Piper's Chinese phonemizer loads a BERT tokenizer through Hugging Face: keep it on the cache.
+env = { HF_HUB_OFFLINE = "1" }
+
+[ja]
+engine = "piper-plus"
+model = "tsukuyomi-chan-6lang-fp16.onnx"
+online = "ja-JP-NanamiNeural"
+
+[fr]
+engine = "piper"
+model = "fr_FR-siwis-medium.onnx"
+online = "fr-FR-DeniseNeural"

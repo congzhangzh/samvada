@@ -1,0 +1,246 @@
+"""The `samvada` command."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+from pathlib import Path
+
+from . import __version__, engines, packs, paths
+from .presence import where
+from .speak import say, speak
+from .state import ONLINE_MODES, State, session_key
+
+USAGE = """\
+usage: samvada speak [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
+                                       play in this order (--save: write the clips, play nothing)
+       samvada <lang> "<text>" ...     the same
+       samvada status                  where the voice goes now and why; languages; online mode
+       samvada [--session] mute ["<why>"] | unmute
+       samvada [--session] lang [on|off <lang>... | reset]
+       samvada [--session] online [off|fallback|always]     default off: local voices only
+       samvada presence [phone]        phone: the owner just wrote from the phone
+       samvada voices [list]           the voice packs: installed where, size, engine
+       samvada voices add <lang>... [--engine auto|always|never]
+                                       download, verify and install (network needed once)
+       samvada voices verify [<lang>...] | remove <lang>...
+       samvada setup [--agent claude|codex] [--native zh] [--langs en,zh] [--ipa|--no-ipa]
+                     [--dry-run] [--uninstall]
+                                       the tutor's rule, the skill and the hooks for an agent
+       samvada hook prompt|stop        run by the agent's hooks (JSON on stdin)
+       samvada version
+
+--session  the setting holds for this session only (Claude Code session, pys window or tty)
+env        SAMVADA=on|off  force playing or silence for one call
+           SAMVADA_ONLINE=off|fallback|always  the online mode for one call
+           SAMVADA_DEBUG=1  show engine output;  SAMVADA_SESSION=<key>
+           SAMVADA_VOICES=<dir>  SAMVADA_ENGINES=<dir>  the folders of the voices and engines
+           HF_ENDPOINT, HF_TOKEN  a Hugging Face mirror; a token against rate limits (optional)
+exit       0 played, or silent by decision; 1 a language failed; 2 bad usage"""
+
+
+class Usage(Exception):
+    pass
+
+
+def _phone_marks(state: State) -> list:
+    return [state.root / "presence" / "phone", paths.legacy_state_dir() / "remote"]
+
+
+def _langs_line(state: State, voices: dict) -> str:
+    dirs = paths.voices_dirs()
+    parts = []
+    for lang, voice in voices.items():
+        s = state.lang(lang)
+        pack = "" if engines.has_pack(voice, dirs) else ", no voice pack"
+        parts.append(f"{lang} {s.value}({s.where}{pack})")
+    return "languages: " + "  ".join(parts)
+
+
+def _show(state: State, voices: dict, full: bool) -> None:
+    print(_langs_line(state, voices))
+    if full:
+        mode = state.online()
+        note = ""
+        if mode.value != "off" and not engines.online_available():
+            note = "  (edge-tts is not installed: pip install 'samvada[online]')"
+        print(f"online: {mode.value} ({mode.where}){note}")
+        print("voices: " + "  ".join(str(d) for d in paths.voices_dirs()))
+    print(f"session: {state.key or 'none (no Claude session, pys window or tty)'}")
+
+
+def _pairs(args: list[str], voices: dict) -> list[tuple[str, str]]:
+    if not args or len(args) % 2:
+        raise Usage(f'usage: samvada speak <{"|".join(voices)}> "text" [<lang> "text" ...]')
+    pairs = list(zip(args[::2], args[1::2]))
+    for lang, _ in pairs:
+        if lang not in voices:
+            raise Usage(f"unknown language {lang} (one of: {' '.join(voices)})")
+    return pairs
+
+
+def run(argv: list[str]) -> int:
+    env = os.environ
+    voices = engines.load_voices()
+    state = State(paths.state_dir(env), session_key(env), legacy=paths.legacy_state_dir(env))
+    session = bool(argv) and argv[0] in ("--session", "-s")
+    if session:
+        argv = argv[1:]
+    cmd, rest = (argv[0], argv[1:]) if argv else ("", [])
+
+    if cmd in ("-h", "--help", "help"):
+        print(USAGE)
+        return 0
+    if cmd == "version":
+        print(f"samvada {__version__}")
+        return 0
+    if cmd == "status":
+        print(where(state, _phone_marks(state)))
+        _show(state, voices, full=True)
+        return 0
+    if cmd == "mute":
+        state.mute(session, rest[0] if rest else "muted by hand")
+        print(where(state, _phone_marks(state)))
+        return 0
+    if cmd == "unmute":
+        state.unmute(session)
+        print(where(state, _phone_marks(state)))
+        return 0
+    if cmd == "lang":
+        if not rest:
+            _show(state, voices, full=False)
+            return 0
+        if rest[0] == "reset" and len(rest) == 1:
+            state.reset_langs(session)
+        elif rest[0] in ("on", "off") and len(rest) >= 2:
+            unknown = [l for l in rest[1:] if l not in voices]
+            if unknown:
+                raise Usage(f"unknown language {unknown[0]} (one of: {' '.join(voices)})")
+            state.set_langs(session, rest[0], rest[1:])
+        else:
+            raise Usage("usage: samvada [--session] lang [on|off <lang>... | reset]")
+        _show(state, voices, full=False)
+        return 0
+    if cmd == "online":
+        if rest:
+            if len(rest) != 1 or rest[0] not in ONLINE_MODES:
+                raise Usage(f"usage: samvada [--session] online [{'|'.join(ONLINE_MODES)}]")
+            state.set_online(session, rest[0])
+            if rest[0] != "off" and not engines.online_available():
+                say("edge-tts is not installed; the online mode needs: pip install 'samvada[online]'")
+        mode = state.online()
+        print(f"online: {mode.value} ({mode.where})")
+        return 0
+    if cmd == "presence":
+        if rest == ["phone"]:
+            state.mark_phone()
+        elif rest:
+            raise Usage("usage: samvada presence [phone]")
+        print(where(state, _phone_marks(state)))
+        return 0
+    if cmd == "voices":
+        return _voices(rest, voices)
+    if cmd == "setup":
+        from .agents import setup
+        return setup.main(rest)
+    if cmd == "hook":
+        from .agents import hooks
+        if rest not in (["prompt"], ["stop"]):
+            raise Usage("usage: samvada hook prompt|stop")
+        return hooks.run(rest[0], state, lambda st: where(st, _phone_marks(st)))
+    if session:
+        raise Usage("--session goes with mute, unmute, lang or online")
+
+    save = None
+    if cmd == "speak":
+        argv = rest
+        if argv[:1] == ["--save"]:
+            if len(argv) < 2:
+                raise Usage("usage: samvada speak --save DIR <lang> \"text\" ...")
+            save, argv = Path(argv[1]), argv[2:]
+    pairs = _pairs(argv, voices)
+    from .agents.hooks import mark_spoke
+    mark_spoke(state)  # the agent spoke this turn, whatever is heard (the Stop hook reads it)
+    if save is None:  # saving plays nothing, so where the owner is does not matter
+        decision = where(state, _phone_marks(state))
+        if not decision.on:
+            say(f"silent, {decision.why}")
+            return 0
+    return speak(pairs, state=state, voices=voices, voices_dirs=paths.voices_dirs(env), env=env,
+                 save=save)
+
+
+def _voices(rest: list[str], voices: dict) -> int:
+    lock = packs.load_lock()
+    home = paths.install_voices_dir()
+    sub, args = (rest[0], rest[1:]) if rest else ("list", [])
+    engine_mode = "auto"
+    if "--engine" in args:
+        i = args.index("--engine")
+        if i + 1 >= len(args) or args[i + 1] not in ("auto", "always", "never"):
+            raise Usage("--engine auto|always|never")
+        engine_mode = args[i + 1]
+        del args[i:i + 2]
+    unknown = [l for l in args if l not in voices]
+    if unknown:
+        raise Usage(f"unknown language {unknown[0]} (one of: {' '.join(voices)})")
+
+    if sub == "list" and not args:
+        dirs = paths.voices_dirs()
+        for lang, voice in voices.items():
+            found = engines.voice_home(voice, dirs)
+            where_ = f"installed in {found}" if found else "not installed"
+            print(f"{lang}  {where_}  ({packs.sizes_line(lock, lang)})  "
+                  f"engine {voice.engine}: {engines.engine_where(voice.engine)}")
+        print(f"install folder: {home}")
+        return 0
+    if sub == "add" and args:
+        total = sum(lock.size(l) for l in args)
+        print(f"samvada: installing {' '.join(args)} into {home} (up to {packs.mb(total)})")
+        status = 0
+        for lang in args:
+            try:
+                got = packs.add(lang, lock, home, os.environ)
+                print(f"{lang}: {'installed' if got else 'already installed'}, verified")
+                engine = voices[lang].engine
+                where_ = engines.engine_where(engine)
+                if where_ != "samvada" and (engine_mode == "always"
+                                            or (engine_mode == "auto" and where_ == "missing")):
+                    packs.install_engine(engine, paths.engines_dir())
+                    print(f"{lang}: engine {engine} installed in {paths.engines_dir() / engine}")
+            except packs.PackError as e:
+                say(f"{lang}: {e}")
+                status = 1
+        return status
+    if sub == "verify":
+        status = 0
+        for lang in args or list(voices):
+            if lang not in packs.installed(home):
+                print(f"{lang}: not installed by samvada in {home}; not verified")
+                continue
+            problems = packs.verify(lang, lock, home)
+            print(f"{lang}: " + ("verified" if not problems else "; ".join(problems)))
+            status |= bool(problems)
+        return status
+    if sub == "remove" and args:
+        for lang in args:
+            packs.remove(lang, lock, home)
+            print(f"{lang}: removed from {home}")
+        return 0
+    raise Usage("usage: samvada voices [list | add <lang>... | verify [<lang>...] | remove <lang>...]")
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return run(list(sys.argv[1:] if argv is None else argv))
+    except Usage as e:
+        print(f"samvada: {e}", file=sys.stderr)
+        return 2
+    except LookupError as e:
+        say(str(e))
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

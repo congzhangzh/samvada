@@ -1,0 +1,74 @@
+annotated-types==0.8.0
+    # via pydantic
+click==8.5.1
+    # via nltk
+cloudpickle==3.1.2
+    # via joblib
+colorama==0.4.6 ; sys_platform == 'win32'
+    # via tqdm
+defusedxml==0.7.1
+    # via nltk
+distance==0.1.3
+    # via g2p-en
+flatbuffers==25.12.19
+    # via onnxruntime
+g2p-en==2.1.0
+    # via piper-plus
+inflect==7.6.0
+    # via g2p-en
+jaraco-functools==4.6.0
+    # via inflect
+joblib==1.6.0
+    # via
+    #   nltk
+    #   piper-plus
+more-itertools==11.2.1
+    # via
+    #   inflect
+    #   jaraco-functools
+nltk==3.10.4
+    # via
+    #   g2p-en
+    #   piper-plus
+numpy==2.5.4
+    # via
+    #   g2p-en
+    #   onnxruntime
+    #   piper-plus
+    #   pyopenjtalk-plus
+onnxruntime==1.31.1
+    # via piper-plus
+packaging==26.3
+    # via onnxruntime
+piper-plus==1.13.0
+protobuf==7.36.2
+    # via onnxruntime
+pydantic==2.14.3
+    # via pyopenjtalk-plus
+pydantic-core==2.50.4
+    # via pydantic
+pyopenjtalk-plus==0.4.1.post10
+    # via piper-plus
+pypinyin==0.55.0
+    # via piper-plus
+regex==2026.11.9
+    # via nltk
+sudachidict-core==20261015
+    # via pyopenjtalk-plus
+sudachipy==0.7.0
+    # via
+    #   pyopenjtalk-plus
+    #   sudachidict-core
+tqdm==4.70.1
+    # via nltk
+typeguard==4.6.0
+    # via inflect
+typing-extensions==4.16.0
+    # via
+    #   pydantic
+    #   pydantic-core
+    #   pyopenjtalk-plus
+    #   typeguard
+    #   typing-inspection
+typing-inspection==0.4.5
+    # via pydantic

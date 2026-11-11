@@ -1,0 +1,105 @@
+# The release pipeline. A tag v<version> builds, tests and publishes; a manual run
+# (workflow_dispatch) does everything except publishing: the dry run before every tag.
+#
+#   test      the suite on every supported Python (fake engines: no audio, no network)
+#   build     the wheel and the sdist; on a tag, the tag must equal the package version
+#   install   a clean install of the built wheel, as a user does it
+#   pypi      on a tag only: PyPI through Trusted Publishing (environment pypi, no token)
+#   github    on a tag only: a GitHub release with the same files
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --python ${{ matrix.python }} --group dev pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the package version $version" >&2
+            exit 1
+          fi
+      - run: uv build --out-dir dist
+      - run: ls -l dist && sha256sum dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+  install:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: astral-sh/setup-uv@v6
+      - run: |
+          uv venv --python 3.12 /tmp/user
+          uv pip install --python /tmp/user/bin/python dist/*.whl
+          export PATH=/tmp/user/bin:$PATH HOME=$(mktemp -d)
+          samvada version
+          samvada voices
+          SAMVADA=off samvada speak en "hello"
+          samvada status
+
+  pypi:
+    needs: [build, install]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/samvada/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write # Trusted Publishing: no token is stored anywhere
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  github:
+    needs: [build, pypi]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "samvada ${{ needs.build.outputs.version }}" \
+            --notes "pip install samvada==${{ needs.build.outputs.version }}" dist/*

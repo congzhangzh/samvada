@@ -1,0 +1,13 @@
+__pycache__/
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+*.wav
+*.mp3
+# voices, models and engines are downloaded, never committed (voices.lock pins them)
+*.onnx
+*.onnx.json
+g2pW/
+nltk_data/
