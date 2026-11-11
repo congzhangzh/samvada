@@ -5,7 +5,8 @@
 #   build     the wheel and the sdist; on a tag, the tag must equal the package version
 #   install   a clean install of the built wheel, as a user does it
 #   pypi      on a tag only: PyPI through Trusted Publishing (environment pypi, no token)
-#   bundle    standalone bundles built and tested on each system (Windows ARM: the x64 one)
+#   bundle    standalone bundles built and tested on each system (Windows arm64: its engines
+#             compiled first, PyPI has no wheel for them there)
 #   github    on a tag only: a GitHub release with the wheel, the sdist and the bundles
 name: release
 
@@ -79,6 +80,9 @@ jobs:
           - { os: ubuntu-24.04-arm, plat: linux-arm64, test: --test }
           - { os: macos-15, plat: macos-arm64, test: --test-local }
           - { os: windows-2025, plat: windows-x86_64, test: --test-local }
+          # native: piper-tts, pyopenjtalk-plus and sudachipy compiled here (build_wheels.py)
+          - { os: windows-11-arm, plat: windows-arm64, test: --test-local, wheels: true,
+              python: cpython-3.12-windows-aarch64-none }
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -92,17 +96,47 @@ jobs:
         with:
           path: ${{ runner.temp }}/samvada-build/download-cache
           key: voices-${{ hashFiles('src/samvada/voices.lock') }}
-      - run: |
+      # the compilers for the engines PyPI has no wheel for: MSVC's ARM64 tools, Rust
+      - if: matrix.wheels
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+      - if: matrix.wheels
+        run: |
+          if ! command -v cargo >/dev/null; then
+            curl -sSfL -o "$RUNNER_TEMP/rustup-init.exe" \
+              https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe
+            "$RUNNER_TEMP/rustup-init.exe" -y --profile minimal
+            echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+      - if: matrix.wheels
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/samvada-build/wheelhouse
+          key: wheels-${{ matrix.plat }}-${{ hashFiles('src/samvada/locks/*.txt', 'release/build_wheels.py') }}
+      # pwsh, not bash: Git Bash puts its /usr/bin first, and its link.exe (coreutils) then
+      # shadows MSVC's linker (rc1: Rust linked with C:\Program Files\Git\usr\bin\link.exe)
+      - if: matrix.wheels
+        shell: pwsh
+        run: |
+          (Get-Command link.exe).Source
+          rustc -vV | Select-String host
+          uv run --python ${{ matrix.python }} python release/build_wheels.py --out "$env:SAMVADA_BUILD_DIR/wheelhouse"
+      - env:
+          WHEELHOUSE: ${{ matrix.wheels && format('--wheelhouse={0}/samvada-build/wheelhouse', runner.temp) || '' }}
+        run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
-          uv run --python 3.12 python release/bundle.py "$version" ${{ matrix.test }}
+          uv run --python ${{ matrix.python || '3.12' }} python release/bundle.py "$version" \
+            ${{ matrix.test }} $WHEELHOUSE
       - uses: actions/upload-artifact@v4
         with:
           name: bundle-${{ matrix.plat }}
           path: ${{ runner.temp }}/samvada-build/bundles/samvada-*
           compression-level: 0
 
-  # Windows on ARM: the x64 bundle under the system's x64 emulation (piper-tts has no arm64
-  # wheel), on a real arm64 runner, network cut by proxy as on the other desktops
+  # Windows on ARM: the x64 bundle under the system's x64 emulation too, on a real arm64
+  # runner, network cut by proxy as on the other desktops; its "speak took" line is the one to
+  # compare with the native windows-arm64 bundle's
   bundle-windows-arm64:
     needs: bundle
     runs-on: windows-11-arm
@@ -169,10 +203,11 @@ jobs:
           cat > notes.md <<EOF
           pip install samvada==$VERSION   (then: samvada voices add en zh)
 
-          Standalone bundles: their own Python, engine and the English and Chinese voices; no
-          network needed. Unpack, then run bin/samvada (Windows: bin\\samvada.cmd).
-          linux-x86_64, linux-arm64, macos-arm64 (macOS 14+), windows-x86_64 (also for
-          Windows on ARM, tested there under x64 emulation). VOICES.md inside lists each voice's
+          Standalone bundles: their own Python, both engines and the English, Chinese, Japanese
+          and French voices; no network needed. Unpack, then run bin/samvada (Windows:
+          bin\\samvada.cmd).
+          linux-x86_64, linux-arm64, macos-arm64 (macOS 14+), windows-x86_64, windows-arm64
+          (native; the x64 one also runs there under emulation). VOICES.md inside lists each voice's
           source; each voice keeps its own license.
           EOF
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \

@@ -1,12 +1,16 @@
 """Build the standalone bundle: Samvada with its own Python, engines and voice packs (DESIGN 8.2).
 
-    uv run python release/bundle.py <version> [--langs en,zh] [--out DIR] [--work DIR]
-                                              [--cache DIR] [--test | --test-local]
-    uv run python release/bundle.py --test-only ARCHIVE [--local] [--langs en,zh]
+    uv run python release/bundle.py <version> [--langs en,zh,ja,fr] [--out DIR] [--work DIR]
+                                              [--cache DIR] [--wheelhouse DIR]
+                                              [--test | --test-local]
+    uv run python release/bundle.py --test-only ARCHIVE [--local] [--langs ...]
 
-Built on the system it is for (Linux x86_64 and arm64, macOS arm64, Windows x86_64); the
-Windows x86_64 bundle is also the one for Windows on ARM, where it runs under the system's
-x64 emulation (piper-tts has no Windows arm64 wheel). It works with no network at all:
+Built on the system it is for, by a Python of that system: Linux x86_64 and arm64, macOS
+arm64, Windows x86_64 and arm64. The platform is the running Python's build (sysconfig), not
+the OS's: an x64 Python on Windows on ARM builds the x64 bundle. Windows arm64 has no PyPI
+wheel for piper-tts, pyopenjtalk-plus and sudachipy, so the release pipeline compiles them
+first and passes them with --wheelhouse; BUNDLE.json records each compiled wheel and its sha256.
+It works with no network at all:
 unpack it anywhere and run bin/samvada (bin\\samvada.cmd on Windows). Layout of
 samvada-<version>-<os>-<arch>/:
 
@@ -38,6 +42,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import time
 import tomllib
@@ -74,11 +79,27 @@ TEST_TEXT = {"en": "Samvada speaks offline.", "zh": "Samvada 离线说话。",
              "ja": "サンヴァーダはオフラインで話します。", "fr": "Samvada parle hors ligne."}
 
 
+def arch() -> str:
+    """What this Python was built for (sysconfig: win-arm64, linux-aarch64, macosx-14.0-arm64);
+    platform.machine() on Windows answers for the OS, even inside an emulated x64 Python. A
+    macOS universal2 build holds both: there platform.machine() is the running process's."""
+    tag = sysconfig.get_platform().rsplit("-", 1)[-1].lower()
+    if tag == "universal2":
+        tag = platform.machine().lower()
+    return {"amd64": "x86_64", "x86_64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}[tag]
+
+
 def plat() -> str:
     os_name = {"linux": "linux", "darwin": "macos", "win32": "windows"}[sys.platform]
-    arch = {"amd64": "x86_64", "x86_64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}[
-        platform.machine().lower()]
-    return f"{os_name}-{arch}"
+    return f"{os_name}-{arch()}"
+
+
+def python_request() -> str:
+    """The standalone CPython to put in the bundle: the same system and arch as this Python
+    (on Windows uv would otherwise pick by the OS, and an ARM machine can run both)."""
+    if WINDOWS:
+        return f"cpython-{PYTHON}-windows-{'aarch64' if arch() == 'arm64' else 'x86_64'}-none"
+    return PYTHON
 
 
 def run(cmd: list, **kw) -> subprocess.CompletedProcess:
@@ -128,7 +149,8 @@ def voices_md(langs: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build(version: str, langs: list[str], out: Path, work: Path, cache: Path) -> Path:
+def build(version: str, langs: list[str], out: Path, work: Path, cache: Path,
+          wheelhouse: Path | None = None) -> Path:
     name = f"samvada-{version}-{plat()}"
     archive = out / (f"{name}.zip" if WINDOWS else f"{name}.tar.gz")
     if archive.exists() or (out / name).exists():
@@ -144,7 +166,7 @@ def build(version: str, langs: list[str], out: Path, work: Path, cache: Path) ->
     wheel = next(wheels.glob("samvada-*.whl"))
 
     pys = work / "python"
-    run(["uv", "python", "install", "--install-dir", pys, PYTHON])
+    run(["uv", "python", "install", "--install-dir", pys, python_request()])
     src = sorted(p for p in pys.glob(f"cpython-{PYTHON}.*") if p.is_dir() and not p.is_symlink())[-1]
     shutil.copytree(src, stage / "python", symlinks=True)
     py = python_exe(stage / "python")
@@ -161,6 +183,11 @@ def build(version: str, langs: list[str], out: Path, work: Path, cache: Path) ->
 
     env = {**os.environ, "SAMVADA_DOWNLOAD_CACHE": str(cache),
            "XDG_STATE_HOME": str(work / "state"), "XDG_DATA_HOME": str(work / "data")}
+    built = {}
+    if wheelhouse:  # wheels compiled for this system, found before the index
+        env["UV_FIND_LINKS"] = str(wheelhouse.resolve())
+        built = {w.name: sha256(w) for w in sorted(wheelhouse.glob("*.whl"))}
+        print(f"bundle: wheelhouse {wheelhouse}: {', '.join(built) or 'empty'}")
     run([launcher, "voices", "add", *langs, "--engine", "always"], env=env)
     run([launcher, "voices", "verify", *langs], env=env)
     shutil.rmtree(work / "state", ignore_errors=True)  # never ship a builder's state
@@ -168,7 +195,7 @@ def build(version: str, langs: list[str], out: Path, work: Path, cache: Path) ->
     (stage / "VOICES.md").write_text(voices_md(langs), encoding="utf-8")
     info = {
         "name": name, "version": version, "platform": plat(), "languages": langs,
-        "python": src.name, "source_commit": git_commit(),
+        "python": src.name, "source_commit": git_commit(), "compiled_wheels": built,
         "voices_lock_sha256": sha256(ROOT / "src/samvada/voices.lock"),
         "built": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "size_bytes": du(stage),
     }
@@ -239,7 +266,9 @@ def test(archive: Path, langs: list[str], work: Path, local: bool) -> int:
                "sh", "-c", 'command -v python3 && echo "python3 found: not a clean machine" && exit 9; '
                            '/opt/samvada/bin/samvada voices verify && '
                            '/opt/samvada/bin/samvada speak --save /out "$@"', "sh", *pairs]
+        t0 = time.perf_counter()
         r = subprocess.run(cmd)
+        print(f"bundle test: container run took {time.perf_counter() - t0:.2f}s (verify and speak)")
         print(f"bundle test: container exit {r.returncode} (network none, no Python on the image)")
         return check_clips(out, langs, r.returncode == 0)
     # local: no container here; cut the network for this process tree as far as a user can
@@ -259,19 +288,24 @@ def test(archive: Path, langs: list[str], work: Path, local: bool) -> int:
     # platform.machine() is the OS's (Windows asks WMI); sysconfig is what python.exe was built for
     print(f"bundle test: the bundle's Python: {seen}")
     r1 = subprocess.run([str(launcher), "voices", "verify", *langs], env=env)
+    t0 = time.perf_counter()
     r2 = subprocess.run([str(launcher), "speak", "--save", str(out), *pairs], env=env)
+    took = time.perf_counter() - t0
     ok = r1.returncode == 0 and r2.returncode == 0
     print(f"bundle test: local exit {r1.returncode}/{r2.returncode} (proxies closed, Hub offline)")
+    # wall clock of the whole speak call: start-up, model load and synthesis, every language
+    print(f"bundle test: speak took {took:.2f}s for {len(langs)} languages")
     return check_clips(out, langs, ok)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("version", nargs="?")
-    ap.add_argument("--langs", default="en,zh", help="the packs inside (default: en,zh)")
+    ap.add_argument("--langs", default="en,zh,ja,fr", help="the packs inside (default: all four)")
     ap.add_argument("--out", type=Path, default=SCRATCH / "bundles")
     ap.add_argument("--work", type=Path, default=SCRATCH / "work")
     ap.add_argument("--cache", type=Path, default=SCRATCH / "download-cache")
+    ap.add_argument("--wheelhouse", type=Path, help="wheels compiled for this system (Windows arm64)")
     ap.add_argument("--test", action="store_true", help="also test in a container with no network")
     ap.add_argument("--test-local", action="store_true", help="also test here, network cut by proxy")
     ap.add_argument("--test-only", type=Path, metavar="ARCHIVE", help="only test this archive")
@@ -282,7 +316,7 @@ def main() -> int:
         return test(a.test_only, langs, a.work, a.local)
     if not a.version:
         ap.error("a version is needed to build")
-    archive = build(a.version, langs, a.out, a.work, a.cache)
+    archive = build(a.version, langs, a.out, a.work, a.cache, a.wheelhouse)
     if a.test or a.test_local:
         return test(archive, langs, a.work, local=a.test_local)
     return 0
