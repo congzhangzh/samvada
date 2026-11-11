@@ -231,7 +231,18 @@ def _voices(rest: list[str], voices: dict) -> int:
     raise Usage("usage: samvada voices [list | add <lang>... | verify [<lang>...] | remove <lang>...]")
 
 
+def _safe_streams() -> None:
+    """Never die on our own output: a Windows console or pipe is often cp1252, which has no
+    "←" or Chinese. What it cannot show is replaced; the work goes on."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _safe_streams()
     try:
         return run(list(sys.argv[1:] if argv is None else argv))
     except Usage as e:
