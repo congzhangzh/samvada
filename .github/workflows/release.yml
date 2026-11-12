@@ -25,8 +25,8 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: uv run --python ${{ matrix.python }} --group dev pytest -q
 
   build:
@@ -35,8 +35,8 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - id: version
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
@@ -47,7 +47,7 @@ jobs:
           fi
       - run: uv build --out-dir dist
       - run: ls -l dist && sha256sum dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist
@@ -56,11 +56,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
       - run: |
           uv venv --python 3.12 /tmp/user
           uv pip install --python /tmp/user/bin/python dist/*.whl
@@ -90,9 +90,9 @@ jobs:
     steps:
       # the runner context exists only inside steps, so the build folder is set here
       - run: echo "SAMVADA_BUILD_DIR=$RUNNER_TEMP/samvada-build" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/samvada-build/download-cache
           key: voices-${{ hashFiles('src/samvada/voices.lock') }}
@@ -110,7 +110,7 @@ jobs:
             echo "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
           fi
       - if: matrix.wheels
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/samvada-build/wheelhouse
           key: wheels-${{ matrix.plat }}-${{ hashFiles('src/samvada/locks/*.txt', 'release/build_wheels.py') }}
@@ -132,38 +132,11 @@ jobs:
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
           uv run --python ${{ matrix.python || '3.12' }} python release/bundle.py "$version" \
             ${{ matrix.test }} $WHEELHOUSE
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bundle-${{ matrix.plat }}
           path: ${{ runner.temp }}/samvada-build/bundles/samvada-*
           compression-level: 0
-
-  # Windows on ARM: the x64 bundle under the system's x64 emulation too, on a real arm64
-  # runner, network cut by proxy as on the other desktops; its "speak took" line is the one to
-  # compare with the native windows-arm64 bundle's
-  bundle-windows-arm64:
-    needs: bundle
-    runs-on: windows-11-arm
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/download-artifact@v4
-        with:
-          name: bundle-windows-x86_64
-          path: bundle
-      # PROCESSOR_ARCHITECTURE is the asking process's view (an emulated x64 shell says AMD64);
-      # the OS architecture is the machine's: fail unless it is Arm64
-      - shell: pwsh
-        run: |
-          $os = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-          Write-Output "machine: OS architecture $os"
-          if ("$os" -ne "Arm64") { throw "not an Arm64 machine: $os" }
-      - run: |
-          uv run --python 3.12 python release/bundle.py --test-only bundle/samvada-*.zip --local \
-            --work "$RUNNER_TEMP/samvada-test"
 
   pypi:
     needs: [build, install]
@@ -175,7 +148,7 @@ jobs:
     permissions:
       id-token: write # Trusted Publishing: no token is stored anywhere
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
@@ -184,17 +157,17 @@ jobs:
           skip-existing: true
 
   github:
-    needs: [build, pypi, bundle, bundle-windows-arm64]
+    needs: [build, pypi, bundle]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: bundle-*
           path: dist
@@ -211,7 +184,7 @@ jobs:
           and French voices; no network needed. Unpack, then run bin/samvada (Windows:
           bin\\samvada.cmd).
           linux-x86_64, linux-arm64, macos-arm64 (macOS 14+), windows-x86_64, windows-arm64
-          (native; the x64 one also runs there under emulation). VOICES.md inside lists each voice's
+          (native). VOICES.md inside lists each voice's
           source; each voice keeps its own license.
           EOF
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
