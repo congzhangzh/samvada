@@ -103,9 +103,15 @@ class State:
         return out
 
     def set_langs(self, session: bool, value: str, langs: list[str]) -> None:
+        self.apply_langs(session, {lang: value for lang in langs})
+
+    def apply_langs(self, session: bool, changes: Mapping[str, str]) -> None:
+        """Turn several languages on or off in one scope, in one write ({lang: on|off})."""
         d = self.scope_dir(session)
         current = self._langs_in(d)
-        for lang in langs:
+        for lang, value in changes.items():
+            if value not in ("on", "off"):
+                raise ValueError(f"{lang}: {value} is neither on nor off")
             current.pop(lang, None)
             current[lang] = value
         _write(d / "langs", "".join(f"{k} {v}\n" for k, v in current.items()))
@@ -119,6 +125,16 @@ class State:
             if value:
                 return Setting(value, scope)
         return Setting("on", "default")
+
+    def lang_scopes(self, lang: str) -> dict[str, str]:
+        """What each scope says about a language ({"session": "on", "global": "off"});
+        a scope that says nothing is left out."""
+        out = {}
+        for scope, d in self._dirs():
+            value = self._langs_in(d).get(lang)
+            if value:
+                out[scope] = value
+        return out
 
     # -- online mode -------------------------------------------------------------------
     def set_online(self, session: bool, mode: str) -> None:

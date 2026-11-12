@@ -30,11 +30,17 @@ samvada speak en "<text>" zh "<text>" ja "<text>" fr "<text>"   # every language
 | "we are watching TV", "watching with my son", "陪孩子看电视", "mute" | `samvada mute "watching TV"` (once), and say once that the voice is muted |
 | "unmute", "TV is over", "speak again" | `samvada unmute` |
 | "mute this session", "quiet here" | `samvada --session mute "<why>"` |
-| "no Japanese anymore", "turn off French everywhere" | `samvada lang off ja` (global) |
-| "turn off French here", "only English in this session" | `samvada --session lang off fr` |
-| "bring French back here" | `samvada --session lang on fr`; `samvada --session lang reset` drops this session's choices |
+| "no Japanese anymore", "turn off French everywhere" | `samvada lang --disable-ja` (global) |
+| "only English everywhere", "Chinese back, no Japanese" | `samvada lang --disable-zh --disable-ja --disable-fr`; `samvada lang --enable-zh --disable-ja` (several in one call) |
+| "turn off French here", "only English in this session" | `samvada --session lang --disable-fr` (`-s` works too, before `lang` or among its options) |
+| "bring French back here" | `samvada --session lang --enable-fr`; `samvada --session lang --reset` drops this session's choices |
+| "which languages are on?", "list the languages" | `samvada lang --list` (`-l`): every language, on or off, where that was set, its voice pack |
 | "online mode", "use edge tts" | `samvada online always`; "safe mode", "offline mode" → `samvada online off` |
 | "allow online when a voice fails" | `samvada online fallback` |
+
+The older form `samvada lang on|off <lang>... | reset` still works (scripts and other sessions
+use it); write the flags. Options combine: `lang -s --reset --disable-fr --list` drops this
+session's choices, turns French off here, then lists.
 
 Unclear whether they mean this session or everywhere: choose the session, and say so. A mute
 in either scope silences; for languages and the online mode, the session wins over global.

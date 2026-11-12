@@ -18,7 +18,10 @@ usage: samvada speak [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
        samvada <lang> "<text>" ...     the same
        samvada status                  where the voice goes now and why; languages; online mode
        samvada [--session] mute ["<why>"] | unmute
-       samvada [--session] lang [on|off <lang>... | reset]
+       samvada [--session] lang [--enable-<lang>]... [--disable-<lang>]... [--reset] [--list|-l]
+                                       e.g. lang --enable-zh --disable-ja; --list: every
+                                       language, on or off, where that was set, its voice pack
+       samvada [--session] lang [on|off <lang>... | reset]   the older form, kept
        samvada [--session] online [off|fallback|always]     default off: local voices only
        samvada presence [phone]        phone: the owner just wrote from the phone
        samvada voices [list]           the voice packs: installed where, size, engine
@@ -71,6 +74,90 @@ def _show(state: State, voices: dict, full: bool) -> None:
     print(f"session: {state.key or 'none (no Claude session, pys window or tty)'}")
 
 
+LANG_USAGE = ("usage: samvada [--session] lang [--enable-<lang>]... [--disable-<lang>]... "
+              "[--reset] [--list|-l]\n"
+              "       samvada [--session] lang [on|off <lang>... | reset]")
+
+
+def _unknown(lang: str, voices: dict) -> Usage:
+    return Usage(f"unknown language {lang} (one of: {' '.join(voices)})")
+
+
+def _lang_flags(args: list[str], voices: dict) -> tuple[dict[str, str], bool, bool, bool]:
+    """--enable-zh --disable-ja --reset --list -s → ({zh: on, ja: off}, reset, list, session)."""
+    changes: dict[str, str] = {}
+    reset = listing = session = False
+    for a in args:
+        if a in ("--list", "-l"):
+            listing = True
+        elif a == "--reset":
+            reset = True
+        elif a in ("--session", "-s"):
+            session = True
+        elif a.startswith(("--enable-", "--disable-")):
+            value = "on" if a.startswith("--enable-") else "off"
+            lang = a.split("-", 3)[3]
+            if lang not in voices:
+                raise _unknown(lang, voices)
+            if changes.get(lang, value) != value:
+                raise Usage(f"{lang} is both enabled and disabled")
+            changes[lang] = value
+        else:
+            raise Usage(f"unknown lang option {a}\n{LANG_USAGE}")
+    return changes, reset, listing, session
+
+
+def _lang_list(state: State, voices: dict) -> None:
+    """One row per supported language: on or off, where that was set, its voice pack."""
+    dirs = paths.voices_dirs()
+    rows = [("lang", "voice", "set in", "voice pack")]
+    for lang, voice in voices.items():
+        s = state.lang(lang)
+        where_ = s.where
+        scopes = state.lang_scopes(lang)
+        if s.where == "session" and "global" in scopes:
+            where_ += f" (global: {scopes['global']})"
+        found = engines.voice_home(voice, dirs)
+        pack = f"installed in {found}" if found else f"not installed: samvada voices add {lang}"
+        rows.append((lang, s.value, where_, pack))
+    widths = [max(len(r[i]) for r in rows) for i in range(3)]
+    for r in rows:
+        print("  ".join(c.ljust(w) for c, w in zip(r, widths)) + "  " + r[3])
+    print(f"session: {state.key or 'none (no Claude session, pys window or tty)'}")
+
+
+def _lang(rest: list[str], session: bool, state: State, voices: dict) -> int:
+    if rest[:1] in (["-h"], ["--help"]):
+        print(LANG_USAGE)
+        return 0
+    listing = False
+    if not rest:
+        pass
+    elif rest[0] == "reset" and len(rest) == 1:  # the older form
+        state.reset_langs(session)
+    elif rest[0] in ("on", "off") and len(rest) >= 2:
+        unknown = [l for l in rest[1:] if l not in voices]
+        if unknown:
+            raise _unknown(unknown[0], voices)
+        state.set_langs(session, rest[0], rest[1:])
+    elif rest[0].startswith("-"):
+        changes, reset, listing, in_session = _lang_flags(rest, voices)
+        session = session or in_session
+        if session and (reset or changes):
+            state.scope_dir(True)  # no session here: say so before anything changes
+        if reset:
+            state.reset_langs(session)
+        if changes:
+            state.apply_langs(session, changes)
+    else:
+        raise Usage(LANG_USAGE)
+    if listing:
+        _lang_list(state, voices)
+    else:
+        _show(state, voices, full=False)
+    return 0
+
+
 def _pairs(args: list[str], voices: dict) -> list[tuple[str, str]]:
     if not args or len(args) % 2:
         raise Usage(f'usage: samvada speak <{"|".join(voices)}> "text" [<lang> "text" ...]')
@@ -109,20 +196,7 @@ def run(argv: list[str]) -> int:
         print(where(state, _phone_marks(state)))
         return 0
     if cmd == "lang":
-        if not rest:
-            _show(state, voices, full=False)
-            return 0
-        if rest[0] == "reset" and len(rest) == 1:
-            state.reset_langs(session)
-        elif rest[0] in ("on", "off") and len(rest) >= 2:
-            unknown = [l for l in rest[1:] if l not in voices]
-            if unknown:
-                raise Usage(f"unknown language {unknown[0]} (one of: {' '.join(voices)})")
-            state.set_langs(session, rest[0], rest[1:])
-        else:
-            raise Usage("usage: samvada [--session] lang [on|off <lang>... | reset]")
-        _show(state, voices, full=False)
-        return 0
+        return _lang(rest, session, state, voices)
     if cmd == "online":
         if rest:
             if len(rest) != 1 or rest[0] not in ONLINE_MODES:

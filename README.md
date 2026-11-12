@@ -28,7 +28,9 @@ samvada voices add en zh         # once: about 290 MB, downloaded and verified
 samvada speak en "Hello" zh "你好"   # plays in this order, then exits
 samvada status                      # where the voice goes now, and why
 samvada mute "watching TV"          # silent until `samvada unmute`
-samvada lang off fr                 # skip a language (the caller still passes it)
+samvada lang --disable-fr           # skip a language (the caller still passes it);
+                                    #   several at once: --enable-zh --disable-ja
+samvada lang --list                 # every language: on or off, set where, its voice pack
 samvada --session mute              # the same, for this terminal session only
 samvada online fallback             # allow edge-tts for a language that fails offline
                                     #   (needs: pip install 'samvada[online]')

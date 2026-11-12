@@ -43,6 +43,72 @@ def test_lang_off_skips_global_and_session(env):
     assert env.played() == ["en", "zh"]
 
 
+def test_lang_flags_several_in_one_call(env):
+    r = env.run("lang", "--disable-ja", "--disable-fr", "--disable-zh")
+    assert r.returncode == 0, r.stderr
+    assert "zh off(global)" in r.stdout and "en on(default)" in r.stdout
+    env.run("speak", *FOUR, SAMVADA="on")
+    assert env.played() == ["en"]
+    env.run("lang", "--enable-zh", "--disable-en")  # on and off together, one write
+    env.run("speak", *FOUR, SAMVADA="on")
+    assert env.played() == ["zh"]
+    assert (env.state / "samvada" / "langs").read_text().splitlines() == [
+        "ja off", "fr off", "zh on", "en off"]
+
+
+def test_lang_flags_session_scope_both_places(env):
+    env.run("lang", "--disable-fr")
+    env.run("--session", "lang", "--enable-fr")       # --session before lang, as today
+    env.run("speak", *FOUR, SAMVADA="on")
+    assert env.played() == ["en", "zh", "ja", "fr"]
+    env.run("lang", "--disable-ja", "--session")      # or among the lang options
+    r = env.run("speak", *FOUR, SAMVADA="on")
+    assert env.played() == ["en", "zh", "fr"] and "skipped ja(session)" in r.stderr
+    env.run("lang", "-s", "--reset")
+    env.run("speak", *FOUR, SAMVADA="on")
+    assert env.played() == ["en", "zh", "ja"]         # back to global: fr off
+
+
+def test_lang_list(env):
+    (env.voices / "fr_FR-siwis-medium.onnx").unlink()
+    env.run("lang", "--disable-zh", "--disable-ja")
+    r = env.run("lang", "-s", "--enable-ja", "--list")  # change, then list
+    assert r.returncode == 0, r.stderr
+    rows = {l.split()[0]: l for l in r.stdout.splitlines()}
+    assert rows["lang"].split()[:3] == ["lang", "voice", "set"]
+    assert rows["en"].split()[1:3] == ["on", "default"]
+    assert rows["zh"].split()[1:3] == ["off", "global"]
+    assert rows["ja"].split()[1:3] == ["on", "session"] and "(global: off)" in rows["ja"]
+    assert f"installed in {env.voices}" in rows["en"]
+    assert "not installed: samvada voices add fr" in rows["fr"]
+    assert rows["session:"].endswith("test-session")
+    assert env.run("lang", "-l").stdout == env.run("lang", "--list").stdout
+
+
+def test_lang_flag_errors_change_nothing(env):
+    for bad in (["--enable-de"], ["--enable-zh", "--disable-zh"], ["--enable"], ["--frob"],
+                ["--disable-fr", "on", "fr"]):
+        r = env.run("lang", *bad)
+        assert r.returncode == 2, bad
+        assert r.stderr.startswith("samvada: "), r.stderr
+    assert not (env.state / "samvada" / "langs").exists()
+    r = env.run("lang", "--disable-fr", "-s", SAMVADA_SESSION="", SPEAK_SESSION="")
+    assert r.returncode == 2 and "no session here" in r.stderr
+    assert not (env.state / "samvada" / "langs").exists()
+    r = env.run("lang", "-s", "-l", SAMVADA_SESSION="", SPEAK_SESSION="")  # a list writes nothing
+    assert r.returncode == 0 and "session: none" in r.stdout
+    assert "--enable-<lang>" in env.run("lang", "--help").stdout
+
+
+def test_lang_old_form_still_works(env):
+    env.run("lang", "off", "zh", "ja")   # the form hooks, rules and other sessions use
+    env.run("speak", *FOUR, SAMVADA="on")
+    assert env.played() == ["en", "fr"]
+    env.run("lang", "reset")
+    env.run("speak", *FOUR, SAMVADA="on")
+    assert env.played() == ["en", "zh", "ja", "fr"]
+
+
 def test_all_off_is_silent_and_ok(env):
     env.run("lang", "off", "en")
     r = env.run("en", "hi", SAMVADA="on")
