@@ -26,8 +26,9 @@ usage: samvada speak [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
                                        download, verify and install (network needed once)
        samvada voices verify [<lang>...] | remove <lang>...
        samvada setup [--agent claude|codex] [--native zh] [--langs en,zh] [--ipa|--no-ipa]
-                     [--dry-run] [--uninstall]
-                                       the tutor's rule, the skill and the hooks for an agent
+                     [--speak-alias[=replace]|--no-speak-alias] [--dry-run] [--uninstall]
+                                       the tutor's rule, the skill and the hooks for an agent;
+                                       --speak-alias adds a `speak` command for samvada speak
        samvada hook prompt|stop        run by the agent's hooks (JSON on stdin)
        samvada version
 
