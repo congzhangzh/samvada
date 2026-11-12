@@ -2,7 +2,7 @@
 # The import is samvada and the command samvada. A release stamps its version, <YYYYMMDD>.<N>,
 # here and in src/samvada/__init__.py.
 name = "samvada"
-version = "20261111.3"
+version = "20261111.4rc3"
 description = "Samvada: a voice and the habits of a language tutor for AI agents, offline first"
 readme = "README.md"
 authors = [

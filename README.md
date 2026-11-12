@@ -34,6 +34,8 @@ samvada online fallback             # allow edge-tts for a language that fails o
                                     #   (needs: pip install 'samvada[online]')
 samvada presence phone              # a chat bridge says: the owner just wrote from the phone
 samvada voices verify               # check the installed voices against their checksums
+samvada setup --speak-alias         # also answer to `speak en "Hello"` (opt-in: the name is
+                                    #   espeak's on some systems; another `speak` is left alone)
 ```
 
 Exit codes: `0` played, or silent by decision; `1` a language failed; `2` bad usage.

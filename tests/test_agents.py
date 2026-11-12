@@ -135,3 +135,45 @@ def test_voice_off_adds_context_and_stop_does_not_insist(env):
 def test_hooks_never_break_a_session(env):
     r = hook(env, "stop", "not json at all")
     assert r.returncode == 0 and r.stdout == ""
+
+
+@pytest.fixture
+def bindir(env, tmp_path):
+    d = tmp_path / "tool-bin"
+    d.mkdir()
+    env.vars["SAMVADA_BIN_DIR"] = str(d)
+    return d
+
+
+def test_speak_alias_is_opt_in_and_runs_samvada_speak(env, claude, bindir):
+    env.run("setup")
+    assert not (bindir / "speak").exists()  # not asked for: nothing
+    r = env.run("setup", "--speak-alias")
+    assert r.returncode == 0, r.stderr
+    text = (bindir / "speak").read_text()
+    assert "managed by `samvada setup --speak-alias`" in text and '-m samvada speak "$@"' in text
+    assert (bindir / "speak").stat().st_mode & 0o111
+    assert "unchanged at" in env.run("setup").stdout  # remembered in tutor.toml
+    r = env.run("setup", "--uninstall")
+    assert "remove" in r.stdout and not (bindir / "speak").exists()
+
+
+def test_speak_alias_leaves_a_foreign_speak_alone_unless_replace(env, claude, bindir):
+    foreign = bindir / "speak"
+    foreign.write_text("#!/bin/sh\necho the old wrapper\n")
+    r = env.run("setup", "--speak-alias")
+    assert "is not Samvada's: left alone" in r.stdout and foreign.read_text().endswith("old wrapper\n")
+    r = env.run("setup", "--speak-alias=replace")
+    assert "replace" in r.stdout and "managed by `samvada setup" in foreign.read_text()
+    backups = list(bindir.glob("speak.samvada-backup-*"))
+    assert len(backups) == 1 and backups[0].read_text().endswith("old wrapper\n")
+    env.run("setup", "--uninstall")  # removes ours and puts the old one back
+    assert foreign.read_text().endswith("old wrapper\n") and not list(bindir.glob("speak.samvada-backup-*"))
+
+
+def test_speak_alias_actually_speaks(env, claude, bindir):
+    env.run("setup", "--speak-alias")
+    env.lines()
+    r = env.run("en", "hello", "zh", "你好", cmd=[str(bindir / "speak")])
+    assert r.returncode == 0, r.stderr
+    assert env.played() == ["en", "zh"]
