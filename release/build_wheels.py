@@ -24,6 +24,7 @@ dependency), Rust for sudachipy, git. Network is used here, never in the bundle.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -60,6 +61,33 @@ def pinned(name: str) -> str:
     sys.exit(f"build_wheels: {name} is not pinned in src/samvada/locks/")
 
 
+# espeak-ng (built by piper-tts, pinned at 724808c) asks `#if __has_include_next(<unistd.h>)`
+# in src/include/compat/unistd.h:22 (and endian.h:23): a GCC/Clang built-in MSVC does not have.
+# Older MSVC let it pass; MSVC of Visual Studio 18 stops on it (C7780 "function-like macro
+# '__has_include_next' is not defined", 20261117.2's dry run). cl's /D cannot define a
+# function-like macro, so a header forced in with /FI through cl's own CL variable, for the
+# piper-tts build only, reads it as 0: the shims then include nothing, as they did before.
+MSVC_SHIM = """/* samvada release/build_wheels.py: see MSVC_SHIM there */
+#if defined(_MSC_VER) && !defined(__clang__) && !defined(__has_include_next)
+#define __has_include_next(x) 0
+#endif
+"""
+NEEDS_SHIM = {"piper-tts"}
+
+
+def build_env(name: str, work: Path) -> dict[str, str] | None:
+    """The environment for building `name`: on Windows, piper-tts gets MSVC_SHIM forced in."""
+    if not (bundle.WINDOWS and name in NEEDS_SHIM):
+        return None
+    shim = work / "msvc-has-include-next.h"
+    shim.parent.mkdir(parents=True, exist_ok=True)
+    shim.write_text(MSVC_SHIM, encoding="utf-8")
+    env = dict(os.environ)
+    env["CL"] = f"/FI{shim} {env.get('CL', '')}".strip()
+    print(f"build_wheels: {name}: CL={env['CL']}", flush=True)
+    return env
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("packages", nargs="*", default=DEFAULT)
@@ -89,7 +117,7 @@ def main() -> int:
         else:
             spec = f"{name}=={version}"
         bundle.run([py, "-m", "pip", "wheel", "--no-deps", "--no-binary", name,
-                    "--wheel-dir", a.out, spec])
+                    "--wheel-dir", a.out, spec], env=build_env(name, a.work))
     bad = [w.name for w in a.out.glob("*.whl") if w.name.endswith("-none-any.whl")]
     if bad:
         sys.exit(f"build_wheels: built without native code (refused): {', '.join(bad)}")
