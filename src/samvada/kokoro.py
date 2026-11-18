@@ -22,6 +22,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import paths
+
 PREFIXES = {"en": "ab", "zh": "z", "ja": "j", "fr": "f", "es": "e", "hi": "h", "it": "i", "pt": "p"}
 LANG_NAMES = {"a": "American English", "b": "British English", "z": "Mandarin Chinese",
               "j": "Japanese", "f": "French", "e": "Spanish", "h": "Hindi", "i": "Italian",
@@ -106,15 +108,73 @@ def voices(model: Path, lang: str | None = None) -> list[KVoice]:
     return [KVoice(n, model) for n in names if want is None or n[:1] in want]
 
 
-def _g2p(lang: str, voice: str, model: Path):
-    """Phonemes for Chinese and Japanese through misaki; None: kokoro's own espeak reads it."""
+# Sounds espeak writes for American English that v1.1-zh's vocabulary lacks, spelled with ones
+# it has: the r-coloured vowels ("Piper" would lose its last sound).
+SPELL = {"ɚ": "əɹ", "ɝ": "ɜɹ"}
+
+
+def english_reader(vocab, phonemize):
+    """English words inside Chinese text (misaki's `en_callable`; without one it puts ❓, and
+    the word is not spoken): espeak's en-us phonemes, the r-coloured vowels spelled out, kept
+    to the model's vocabulary."""
+    def read(text: str) -> str:
+        spelled = "".join(SPELL.get(c, c) for c in phonemize(text))
+        return "".join(c for c in spelled if c in vocab).strip()
+    return read
+
+
+def _espeak_en(k):
+    """kokoro-onnx's own espeak, the one it reads English with (set up when the model loads),
+    as (vocab, phonemize); None when this kokoro_onnx has no tokenizer to share."""
+    vocab = getattr(getattr(k, "tokenizer", None), "vocab", None)
+    if not vocab:
+        return None
+    try:
+        from contextlib import nullcontext
+
+        from kokoro_onnx import tokenizer as kt
+        from phonemizer.backend import EspeakBackend
+    except ImportError:
+        return None
+    lock = getattr(kt, "_espeak_lock", None) or nullcontext()  # espeak's state is global
+    backend = []  # made at the first English word, then kept (the warm engine reuses it)
+
+    def phonemize(text: str) -> str:
+        with lock:
+            if not backend:
+                backend.append(EspeakBackend("en-us", preserve_punctuation=True, with_stress=True))
+            return backend[0].phonemize([text])[0]
+    return vocab, phonemize
+
+
+def _g2p(lang: str, voice: str, model: Path, en=None):
+    """Phonemes for Chinese and Japanese through misaki; None: kokoro's own espeak reads it.
+    `en` reads the English words inside Chinese text."""
     if lang == "zh":
         from misaki import zh
-        return zh.ZHG2P(version="1.1" if "v1.1" in model.name else None)
+        version = "1.1" if "v1.1" in model.name else None
+        return zh.ZHG2P(version=version, en_callable=en) if en else zh.ZHG2P(version=version)
     if lang == "ja":
         from misaki import ja
         return ja.JAG2P()
     return None
+
+
+def _jieba_cache() -> None:
+    """jieba (misaki's Chinese word splitter) keeps its dictionary cache (9 MB) in the temp
+    folder by default, `/tmp/jieba.cache`: often RAM, shared by every user and install of the
+    machine. Keep it in Samvada's cache folder; set before its first word, when it loads."""
+    try:
+        import jieba
+    except ImportError:
+        return
+    d = paths.cache_dir()
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return  # then jieba's own default, as before
+    if hasattr(jieba, "dt"):
+        jieba.dt.tmp_dir = str(d)
 
 
 class Engine:
@@ -123,6 +183,8 @@ class Engine:
 
     def __init__(self, model: str, lang: str) -> None:
         self.model, self.lang = Path(model).expanduser(), lang
+        if lang == "zh":
+            _jieba_cache()
         vf = voices_file(self.model)
         if vf is None:
             raise RuntimeError(f"no voices*.bin beside {self.model}")
@@ -142,7 +204,8 @@ class Engine:
             self.k = None  # an older kokoro_onnx, or a test's stand-in: its own session
         if self.k is None:
             self.k = Kokoro(str(self.model), str(vf), vocab_config=vocab)
-        self.g2p = _g2p(lang, "", self.model)
+        found = _espeak_en(self.k) if lang == "zh" else None
+        self.g2p = _g2p(lang, "", self.model, english_reader(*found) if found else None)
 
     def speak(self, text: str, voice: str, out: str) -> None:
         if self.g2p is not None:

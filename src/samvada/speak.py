@@ -44,6 +44,15 @@ def from_package(voice: Voice, env: Mapping[str, str]) -> Path | None:
     return engines.voice_home(voice, [home])
 
 
+def _why_not(voice: engines.Voice, home: Path | None, env: Mapping[str, str]) -> str:
+    """Why the primary voice did not speak, in the words `status` and `doctor` use."""
+    if home is None:
+        return "has no voice pack"
+    if engines.engine_where(voice.engine, env) == "missing":
+        return f"engine not installed (samvada voices add {voice.lang})"
+    return "failed"
+
+
 def _wants_wait(env: Mapping[str, str]) -> bool:
     return str(env.get("SAMVADA_WAIT", "")).lower() in ("1", "yes", "on", "true")
 
@@ -115,7 +124,7 @@ def speak(pairs: list[tuple[str, str]], *, state: State, voices: dict[str, Voice
                 clip = wav
             elif fb_home is not None and engines.offline(fb, text, wav, fb_home, debug):
                 clip = wav  # the fallback: Kokoro when Piper's voice is missing or fails
-                say(f"{lang}: {voice.engine} {'failed' if home else 'has no voice pack'}, "
+                say(f"{lang}: {voice.engine} {_why_not(voice, home, env)}, "
                     f"used {fb.engine} {fb.style or Path(fb.model).stem}")
             elif mode != "off":
                 if engines.online(voice, text, mp3, debug):

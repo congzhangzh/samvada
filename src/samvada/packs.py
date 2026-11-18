@@ -360,7 +360,9 @@ def install_engine(engine: str, root: Path, log=print) -> Path:
     shutil.rmtree(staging, ignore_errors=True)
     uv = shutil.which("uv")
     if uv:
-        cmd = [uv, "pip", "install", "--quiet", "--python", sys.executable,
+        # --compile-bytecode: the first sentence would otherwise compile it (pypinyin's
+        # dictionaries made Kokoro's first Chinese load 12 s instead of 3.7 s); pip does by default
+        cmd = [uv, "pip", "install", "--quiet", "--python", sys.executable, "--compile-bytecode",
                "--target", str(staging), "--no-deps", "-r", str(reqs)]
     else:
         cmd = [sys.executable, "-m", "pip", "install", "--quiet", "--target", str(staging),

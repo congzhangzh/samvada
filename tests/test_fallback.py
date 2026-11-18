@@ -77,6 +77,16 @@ def test_kokoro_when_piper_fails(env):
     assert kokoro_lines(env) == ["kokoro kokoro-v1.1-zh.onnx zf_001 你好"]
 
 
+def test_kokoro_when_piper_is_not_installed(env):
+    """The pack is there, the engine is not: say so, as status does, not "failed"."""
+    kokoro_installed(env)
+    (env.bin / "piper").unlink()
+    r = env.run("speak", "en", "hi")
+    assert r.returncode == 0, r.stderr
+    assert "en: piper engine not installed (samvada voices add en), used kokoro af_heart" in r.stderr
+    assert kokoro_lines(env) == ["kokoro kokoro-v1.0.onnx af_heart hi"]
+
+
 def test_no_kokoro_installed_means_the_old_way(env):
     (env.voices / "en_US-lessac-high.onnx").unlink()
     r = env.run("speak", "en", "hi")

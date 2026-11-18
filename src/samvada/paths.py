@@ -80,6 +80,11 @@ def voices_dirs(env: Mapping[str, str] = os.environ) -> list[Path]:
     return [data_dir(env) / "voices", legacy]
 
 
+def cache_dir(env: Mapping[str, str] = os.environ) -> Path:
+    """Caches an engine may rebuild at any time (jieba's dictionary): never the temp folder."""
+    return _xdg(env, "XDG_CACHE_HOME", ".cache") / "samvada"
+
+
 def engines_dir(env: Mapping[str, str] = os.environ) -> Path:
     """Engine folders made by `samvada voices add`: $SAMVADA_ENGINES (a bundle sets it)."""
     return Path(env["SAMVADA_ENGINES"]) if env.get("SAMVADA_ENGINES") else data_dir(env) / "engines"
