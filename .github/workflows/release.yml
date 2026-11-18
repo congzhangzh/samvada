@@ -178,7 +178,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/samvada-build/wheelhouse
-          key: wheels-${{ matrix.plat }}-${{ hashFiles('src/samvada/locks/*.txt', 'release/build_wheels.py') }}
+          # only the engines compiled here (piper, piper-plus): the Kokoro lock is not in a bundle,
+          # and a key that moved with it forced a fresh compile, which today's MSVC breaks on
+          # espeak-ng (C7780 __has_include_next; 20261117.2's dry run)
+          key: wheels-${{ matrix.plat }}-${{ hashFiles('src/samvada/locks/piper*.txt', 'release/build_wheels.py') }}
       # pwsh, not bash: Git Bash puts its /usr/bin first, and its link.exe (coreutils) then
       # shadows MSVC's linker (rc1: Rust linked with C:\Program Files\Git\usr\bin\link.exe)
       - if: matrix.wheels
