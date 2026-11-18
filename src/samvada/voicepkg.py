@@ -43,7 +43,8 @@ PINS = "voice-packages.toml"
 
 
 def module(lang: str) -> str:
-    return f"samvada_voice_{lang}"
+    """The package's module; a pack like en-kokoro gives samvada_voice_en_kokoro."""
+    return f"samvada_voice_{lang.replace('-', '_')}"
 
 
 def project(lang: str) -> str:

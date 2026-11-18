@@ -54,6 +54,8 @@ class Env:
         self.voices = tmp / "voices"
         self.log = tmp / "log"
         self.state = tmp / "state"
+        import tempfile
+        self.runtime = Path(tempfile.mkdtemp(prefix="sv", dir="/tmp"))  # its own, short
         for d in (self.bin, self.voices, self.state):
             d.mkdir()
         for name, body in (("piper", FAKE_PIPER), ("piper-plus", FAKE_PIPER),
@@ -68,21 +70,24 @@ class Env:
             "HOME": str(tmp),
             "XDG_STATE_HOME": str(self.state),
             "XDG_DATA_HOME": str(tmp / "data"),
-            "XDG_RUNTIME_DIR": str(tmp),
+            "XDG_RUNTIME_DIR": str(self.runtime),  # short: a socket path must stay under ~100 B
             "SAMVADA_VOICES": str(self.voices),
             "PIPER_DIR": str(self.voices),
             "SAMVADA_SESSION": "test-session",
             "SPEAK_SESSION": "test-session",  # the bash wrapper, in the parity tests
             "FAKE_LOG": str(self.log),
             "FAKE_IDLE_MS": "1000",
+            "SAMVADA_WARM": "off",  # one process per clip, unless a test turns warm engines on
+            "SAMVADA_WAIT": "1",  # speak waits until heard, so a test sees what was played
         }
 
-    def run(self, *args: str, cmd: list[str] | None = None, **extra: str):
+    def run(self, *args: str, cmd: list[str] | None = None, input: str | None = None,
+            **extra: str):
         env = {**self.vars, **extra}
         base = cmd or [sys.executable, "-m", "samvada"]
         env.setdefault("PYTHONPATH", str(ROOT / "src"))
         return subprocess.run(base + list(args), env=env, capture_output=True, text=True,
-                              stdin=subprocess.DEVNULL)
+                              input=input, stdin=None if input is not None else subprocess.DEVNULL)
 
     def lines(self) -> list[str]:
         if not self.log.exists():
@@ -98,5 +103,8 @@ class Env:
 
 
 @pytest.fixture
-def env(tmp_path: Path) -> Env:
-    return Env(tmp_path)
+def env(tmp_path: Path):
+    e = Env(tmp_path)
+    yield e
+    import shutil
+    shutil.rmtree(e.runtime, ignore_errors=True)

@@ -2,7 +2,7 @@
 # The import is samvada and the command samvada. A release stamps its version, <YYYYMMDD>.<N>,
 # here and in src/samvada/__init__.py.
 name = "samvada"
-version = "20261117.1"
+version = "20261117.2"
 description = "Samvada: a voice and the habits of a language tutor for AI agents, offline first"
 readme = "README.md"
 authors = [
@@ -61,7 +61,7 @@ include = ["src/samvada", "tests", "release", "README.md", "LICENSE", "pyproject
 # that PyPI does not have yet; one it has must be byte for byte the same (the wheels are
 # reproducible). Once they are on PyPI, `dependencies` pins en and zh and the extras ja and fr
 # at this version (DESIGN 8.1: the voice data first, then the dependency on it).
-voice-packages = "20261112.1"
+voice-packages = "20261117.1"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

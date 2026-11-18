@@ -12,7 +12,8 @@
 #             package wheels served as the GitHub release serves them, and from the installed
 #             packages, both with the network to the Hub closed
 #   github-voices  on a tag only: the GitHub release voices-<voice-packages version> with the
-#             four wheels, made once; a release of that name must hold the same SHA256SUMS
+#             six wheels (en, zh, ja, fr; en-kokoro and zh-kokoro, GitHub only), made once; a
+#             release of that name must hold the same SHA256SUMS
 #   pypi      on a tag only: samvada to PyPI through Trusted Publishing (environment pypi, no
 #             token), after its voices are on GitHub; no voice package (en and zh wait for
 #             PyPI's limit raise, pypi/support#13115 and #13116)
@@ -123,7 +124,8 @@ jobs:
           export PATH=/tmp/user/bin:$PATH HOME=$(mktemp -d) HF_ENDPOINT=http://127.0.0.1:9 \
             SAMVADA_VOICES_URL=http://127.0.0.1:8765/
           samvada voices add en zh ja fr --engine never
-          samvada voices verify en zh ja fr
+          samvada voices add en zh --kokoro --engine never
+          samvada voices verify
       - name: the voices from the installed voice packages, the Hub closed
         run: |
           uv pip install --python /tmp/user/bin/python --no-index --find-links voice-packages \

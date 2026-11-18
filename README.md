@@ -20,10 +20,18 @@ Status: alpha. Linux (GNOME) is the tested platform.
 ```bash
 uv tool install samvada          # or: pip install samvada
 samvada voices add en zh ja fr   # once, the languages you want: each voice and its engine
+samvada voices add en zh --kokoro   # optional: Kokoro, the fallback for en and zh (full models)
 ```
 
+English and Chinese have a second voice, **Kokoro** (Apache-2.0, full fp32 models: en 354 MB,
+zh 379 MB, and its engine). It is installed only with `--kokoro`, and speaks when the Piper
+voice is missing or fails (`samvada status` shows each language's order). To make it your
+default, name it for that language in `~/.config/samvada/voices.local.toml`
+(`[en]` `engine = "kokoro"`, `model = "kokoro/v1.0/kokoro-v1.0.onnx"`, `style = "af_heart"`);
+Piper then becomes its fallback.
+
 Each language's voice is one wheel on samvada's GitHub release `voices-<version>` (en 106 MB,
-zh 172, ja 38, fr 58). `samvada voices add` downloads it, checks it against the sha256 Samvada
+zh 172, ja 38, fr 58; the Kokoro fallback, `--kokoro`: en 327 MB, zh 341 MB). `samvada voices add` downloads it, checks it against the sha256 Samvada
 pins, and installs every file only after checking it against `voices.lock`; if GitHub fails, it
 takes the same files from Hugging Face one by one. `SAMVADA_VOICES_URL` points it at a mirror
 of the release. A wheel can also be installed with pip (`pip install <its URL>`); `samvada`

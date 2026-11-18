@@ -57,7 +57,11 @@ LIMITS = {"samvada-voice-en": 200 * MiB,  # pypi/support#13115
 NAMES = {"en": "English", "zh": "Chinese", "ja": "Japanese", "fr": "French"}
 SOURCE = "https://github.com/congzhangzh/samvada"
 PINS = ROOT / "src/samvada" / voicepkg.PINS
-ALL = ("en", "zh", "ja", "fr")
+ALL = ("en", "zh", "ja", "fr", "en-kokoro", "zh-kokoro")
+# Packs only on the GitHub release, never on PyPI: the full Kokoro models make wheels of
+# 340-370 MB, over any limit PyPI gives a project. GitHub takes 2 GiB a file.
+GITHUB_ONLY = {"samvada-voice-en-kokoro", "samvada-voice-zh-kokoro"}
+GITHUB_MAX = 2 * 1024 * MiB
 
 
 def release_url(v: str) -> str:
@@ -71,6 +75,17 @@ def version() -> str:
 
 def voice_map() -> dict:
     return tomllib.loads((ROOT / "src/samvada/voices.toml").read_text(encoding="utf-8"))
+
+
+def voice_of(lang: str, voices: dict) -> dict:
+    """The voice a pack holds: <lang> its default voice, <lang>-kokoro its Kokoro fallback."""
+    base, _, variant = lang.partition("-")
+    return voices[base]["fallback"] if variant else voices[base]
+
+
+def name_of(lang: str) -> str:
+    base, _, variant = lang.partition("-")
+    return NAMES.get(base, base) + (f" {variant.capitalize()}" if variant else "")
 
 
 def sha256(path: Path) -> str:
@@ -94,14 +109,15 @@ def terms(lang: str, voice: dict) -> list[str]:
 
 
 def readme(lang: str, v: str, files: list[packs.File], voice: dict, digest: str) -> str:
+    base, _, variant = lang.partition("-")
+    add = f"samvada voices add {base}" + (f" --{variant}" if variant else "")
     lines = [f"# {voicepkg.project(lang)}", "",
-             f"The {NAMES.get(lang, lang)} voice for [Samvada]({SOURCE}), offline text to speech "
+             f"The {name_of(lang)} voice for [Samvada]({SOURCE}), offline text to speech "
              f"for AI agents: `{voice['model']}` ({voice['engine']}), version {v}. "
              "Data only: nothing here is meant to be imported.", "",
-             "`pip install samvada` brings the English and Chinese voices; "
-             f"`pip install 'samvada[{lang}]'` this one. Samvada installs the voice from it on "
-             "first use, or with `samvada voices add " + lang + "`, and checks every byte "
-             "against its `voices.lock` (size and sha256) first.", ""]
+             f"`{add}` downloads this package from Samvada's GitHub release and installs the "
+             "voice from it, checking every byte against its `voices.lock` (size and sha256) "
+             "first; installed with pip, Samvada takes the voice from it with no network.", ""]
     lines += ["## The voice's own terms", "",
               "These files are the voice's, unchanged, redistributed under its own terms; "
               "Samvada's MIT license does not cover them.", "", *terms(lang, voice), "",
@@ -114,7 +130,7 @@ def readme(lang: str, v: str, files: list[packs.File], voice: dict, digest: str)
 
 def license_md(lang: str, voice: dict, files: list[packs.File]) -> str:
     return "\n".join([
-        f"# The {NAMES.get(lang, lang)} voice's terms", "",
+        f"# The {name_of(lang)} voice's terms", "",
         "This package redistributes the voice files below, byte for byte as published at their",
         "source. They keep their own terms, which you accept by using them; Samvada's MIT",
         "license does not cover them.", "", *terms(lang, voice), "",
@@ -122,7 +138,7 @@ def license_md(lang: str, voice: dict, files: list[packs.File]) -> str:
 
 
 def pyproject(lang: str, v: str, voice: dict) -> str:
-    desc = (f"The {NAMES.get(lang, lang)} voice for Samvada ({voice['model'].removesuffix('.onnx')})"
+    desc = (f"The {name_of(lang)} voice for Samvada ({Path(voice['model']).stem})"
             ": data only")
     return f'''[project]
 name = "{voicepkg.project(lang)}"
@@ -172,8 +188,9 @@ def layout(lang: str, files: list[packs.File], blobs: dict[str, Path], v: str, v
 
 
 def limit(project: str) -> int:
-    """The largest file PyPI takes for this project."""
-    return LIMITS.get(project, PYPI_MAX)
+    """The largest file this project's wheel may be: PyPI's limit for it, GitHub's for a
+    GitHub-only one."""
+    return GITHUB_MAX if project in GITHUB_ONLY else LIMITS.get(project, PYPI_MAX)
 
 
 def fetch_all(lang: str, lock: packs.Lock, work: Path, cache: Path) -> dict[str, Path]:
@@ -220,6 +237,9 @@ def pypi_plan(dest: Path, upload: Path,
     for line in (dest / "SHA256SUMS").read_text().splitlines():
         h, name = line.split(maxsplit=1)
         project_, v = name.split("-")[0].replace("_", "-"), name.split("-")[1]
+        if project_ in GITHUB_ONLY:
+            print(f"  {name}: GitHub only, never PyPI")
+            continue
         info = ask(project_, v)
         if info is None:
             shutil.copyfile(dest / name, upload / name)
@@ -241,15 +261,17 @@ def pypi_plan(dest: Path, upload: Path,
 
 def pins_text(dest: Path, v: str) -> str:
     """voice-packages.toml for the build in `dest`."""
-    langs = {e["lang"]: e for e in json.loads((dest / "voice-packages.json").read_text())["langs"]}
+    meta = json.loads((dest / "voice-packages.json").read_text())["langs"]
+    langs = {e["lang"]: e for e in meta}
+    by_project = {e["project"].replace("-", "_"): e["lang"] for e in meta}
     out = ["# Generated by release/voice_packages.py --write-pins: do not edit by hand.",
            "# Each language's voice package wheel on samvada's GitHub release voices-<version>;",
            "# `samvada voices add` downloads it, checks it and reads the pack's files from it.",
            f'version = "{v}"', f'url = "{release_url(v)}"', ""]
     for line in (dest / "SHA256SUMS").read_text().splitlines():
         h, name = line.split(maxsplit=1)
-        lang = name.split("-")[0].rsplit("_", 1)[1]
-        out += [f"[wheels.{lang}]", f'file = "{name}"', f"size = {(dest / name).stat().st_size}",
+        lang = by_project[name.split("-")[0]]
+        out += [f'[wheels."{lang}"]' if "-" in lang else f"[wheels.{lang}]", f'file = "{name}"', f"size = {(dest / name).stat().st_size}",
                 f'sha256 = "{h}"', f'digest = "{langs[lang]["digest"]}"', ""]
     return "\n".join(out).rstrip() + "\n"
 
@@ -265,7 +287,7 @@ def check_pins(dest: Path, v: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", type=Path, required=True, help="the wheels go in OUT/<version>/")
-    ap.add_argument("--langs", default="en,zh,ja,fr")
+    ap.add_argument("--langs", default=",".join(ALL))
     ap.add_argument("--cache", type=Path, default=Path(os.environ.get(
         "SAMVADA_BUILD_DIR", Path.home() / ".cache/samvada-build")) / "download-cache")
     ap.add_argument("--work", type=Path, help="default OUT/.work")
@@ -328,7 +350,7 @@ def build(a, v: str, langs: list[str], dest: Path) -> int:
             raise SystemExit(f"no pack {lang} in voices.lock")
         print(f"voice packages {v}: {lang}, {len(files)} files, {packs.mb(lock.size(lang))}")
         blobs = fetch_all(lang, lock, work / "files", a.cache)
-        d = layout(lang, files, blobs, v, voices[lang], staging / lang)
+        d = layout(lang, files, blobs, v, voice_of(lang, voices), staging / lang)
         subprocess.run(["uv", "build", "--quiet", "--wheel", "--out-dir", str(built), str(d)],
                        check=True)
         summary.append({"lang": lang, "digest": voicepkg.digest(files), "project": d.name})

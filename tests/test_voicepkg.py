@@ -274,8 +274,20 @@ def test_the_shipped_pins_name_every_voice_of_this_voices_lock():
     lock = packs.load_lock(ROOT / "src/samvada/voices.lock")
     assert pins["version"] == vp.version()
     assert pins["url"] == vp.release_url(vp.version())
-    assert set(pins["wheels"]) == {"en", "zh", "ja", "fr"}
+    assert set(pins["wheels"]) == set(vp.ALL) == {"en", "zh", "ja", "fr", "en-kokoro", "zh-kokoro"}
     for lang, w in pins["wheels"].items():
         assert w["digest"] == voicepkg.digest(lock.pack(lang)), lang
-        assert w["file"] == f"samvada_voice_{lang}-{pins['version']}-py3-none-any.whl"
-        assert 0.8 * lock.size(lang) < w["size"] < 200 * 2**20, lang  # a zip of floats: ~deflate
+        assert w["file"] == f"{voicepkg.module(lang)}-{pins['version']}-py3-none-any.whl"
+        assert 0.8 * lock.size(lang) < w["size"] < vp.limit(voicepkg.project(lang)), lang
+
+
+def test_the_kokoro_packs_are_github_only(tmp_path):
+    """Their wheels (the full models) are over any PyPI limit: the PyPI plan leaves them out."""
+    assert voicepkg.module("en-kokoro") == "samvada_voice_en_kokoro"
+    assert vp.voice_of("zh-kokoro", VOICES)["engine"] == "kokoro"
+    d = tmp_path / "built"
+    d.mkdir()
+    (d / "SHA256SUMS").write_text("ab  samvada_voice_en_kokoro-1.0-py3-none-any.whl\n")
+    asked = []
+    assert vp.pypi_plan(d, tmp_path / "up", ask=lambda p, v: asked.append(p)) == []
+    assert asked == []

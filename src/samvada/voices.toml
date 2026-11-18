@@ -15,6 +15,15 @@ online = "en-US-AvaMultilingualNeural"
 license = "trained on the Lessac (Blizzard 2013) data, under its research licence"
 license_url = "https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html"
 
+# The fallback: speaks when the voice above is missing or its engine fails. Installed only
+# on request: `samvada voices add en --kokoro` (full fp32 model, 354 MB with its voices).
+[en.fallback]
+engine = "kokoro"
+model = "kokoro/v1.0/kokoro-v1.0.onnx"
+style = "af_heart"
+license = "Apache-2.0 (Kokoro-82M by hexgrad); af_heart is graded A by its authors"
+license_url = "https://huggingface.co/hexgrad/Kokoro-82M"
+
 [zh]
 engine = "piper"
 model = "zh_CN-xiao_ya-medium.onnx"
@@ -23,6 +32,15 @@ license = "trained on Databaker's BZNSYP corpus: non-commercial use"
 license_url = "https://www.data-baker.com/data/index/TNtts/"
 # Piper's Chinese phonemizer loads a BERT tokenizer through Hugging Face: keep it on the cache.
 env = { HF_HUB_OFFLINE = "1" }
+
+# The fallback (`samvada voices add zh --kokoro`: full fp32 model, 379 MB with its voices
+# and config): one of 100 Mandarin speakers from LongMaoData's professional data.
+[zh.fallback]
+engine = "kokoro"
+model = "kokoro/v1.1-zh/kokoro-v1.1-zh.onnx"
+style = "zf_001"
+license = "Apache-2.0 (Kokoro-82M-v1.1-zh by hexgrad; Chinese data from LongMaoData)"
+license_url = "https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh"
 
 [ja]
 engine = "piper-plus"

@@ -150,6 +150,50 @@ unpack = ""
 size = 5458
 sha256 = "df814aa3dfedd00510a07144442cc0a220ff21e43d03c3b078444fc0be68fc37"
 
+[[file]]
+pack = "en-kokoro"
+url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+dest = "kokoro/v1.0/kokoro-v1.0.onnx"
+unpack = ""
+size = 325532387
+sha256 = "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5"
+
+[[file]]
+pack = "en-kokoro"
+url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin"
+dest = "kokoro/v1.0/voices-v1.0.bin"
+unpack = ""
+size = 28214398
+sha256 = "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+
+[[file]]
+pack = "zh-kokoro"
+url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.1-zh.onnx"
+dest = "kokoro/v1.1-zh/kokoro-v1.1-zh.onnx"
+unpack = ""
+size = 325506167
+sha256 = "859f9ded9f53be16c24857cdab3254a45da53c3afd5ba6ef134c7de3f822e326"
+
+[[file]]
+pack = "zh-kokoro"
+url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.1-zh.bin"
+dest = "kokoro/v1.1-zh/voices-v1.1-zh.bin"
+unpack = ""
+size = 53815880
+sha256 = "14cb6186c99e4f6016871405f62046c5df863ae27465cbdc4ee08be7dd703acd"
+
+[[file]]
+pack = "zh-kokoro"
+repo = "hexgrad/Kokoro-82M-v1.1-zh"
+repo_type = "model"
+revision = "01e7505bd6a7a2ac4975463114c3a7650a9f7218"
+path = "config.json"
+dest = "kokoro/v1.1-zh/config.json"
+unpack = ""
+size = 3228
+sha256 = "bc333efa5ce4ceff433c8c8e5d027a1eca0166001e4e4a62bea2d26ff7a46890"
+
 [engines]
 piper = "piper-tts[zh]==1.8.0"
 piper-plus = "piper-plus==1.13.0"
+kokoro = "kokoro-onnx==0.6.1\nmisaki[zh]==0.9.4"

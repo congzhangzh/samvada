@@ -23,17 +23,36 @@ def _winsound(path: Path) -> bool:
         return False
 
 
-def play(path: Path) -> bool:
-    if sys.platform == "win32":
-        return _winsound(path)
+def _players(path: Path):
     for name in PLAYERS:
         if name == "aplay" and path.suffix.lower() != ".wav":
             continue
         exe = shutil.which(name)
         if exe:
-            try:
-                return subprocess.run([exe, str(path)], stdout=subprocess.DEVNULL,
-                                      stderr=subprocess.DEVNULL).returncode == 0
-            except OSError:
-                continue
+            yield exe
+
+
+def play(path: Path) -> bool:
+    if sys.platform == "win32":
+        return _winsound(path)
+    for exe in _players(path):
+        try:
+            return subprocess.run([exe, str(path)], stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL).returncode == 0
+        except OSError:
+            continue
     return False
+
+
+def start(path: Path) -> subprocess.Popen | None:
+    """Start playing and return at once, so the caller can stop it (`terminate()`); None
+    when no player can (and on Windows, where winsound has no process to stop)."""
+    if sys.platform == "win32":
+        return None
+    for exe in _players(path):
+        try:
+            return subprocess.Popen([exe, str(path)], stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+        except OSError:
+            continue
+    return None

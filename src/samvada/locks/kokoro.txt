@@ -1,0 +1,46 @@
+addict==2.4.0
+    # via misaki
+attrs==26.1.0
+    # via phonemizer
+cloudpickle==3.1.2
+    # via joblib
+cn2an==0.5.24
+    # via misaki
+dlinfo==2.0.0
+    # via phonemizer
+espeakng-loader==0.2.4
+    # via kokoro-onnx
+flatbuffers==25.12.19
+    # via onnxruntime
+jieba==0.42.1
+    # via misaki
+joblib==1.6.0
+    # via phonemizer
+kokoro-onnx==0.6.1
+misaki==0.9.4
+numpy==2.5.5
+    # via
+    #   kokoro-onnx
+    #   onnxruntime
+onnxruntime==1.32.0
+    # via kokoro-onnx
+ordered-set==4.1.0
+    # via misaki
+packaging==26.3
+    # via onnxruntime
+phonemizer==3.6.0
+    # via kokoro-onnx
+proces==0.1.7
+    # via cn2an
+protobuf==7.36.2
+    # via onnxruntime
+pypinyin==0.55.0
+    # via
+    #   misaki
+    #   pypinyin-dict
+pypinyin-dict==0.9.0
+    # via misaki
+regex==2026.11.15
+    # via misaki
+typing-extensions==4.16.0
+    # via phonemizer

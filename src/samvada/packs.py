@@ -340,7 +340,8 @@ def engine_ok(d: Path) -> bool:
     """An engine folder made by install_engine for this Python."""
     tag = f"{sys.version_info.major}.{sys.version_info.minor}"
     try:
-        return (d / ".python").read_text().strip() == tag and (d / "piper").is_dir()
+        package = {"kokoro": "kokoro_onnx", "voicevox": "voicevox_core"}.get(d.name, "piper")
+        return (d / ".python").read_text().strip() == tag and (d / package).is_dir()
     except OSError:
         return False
 

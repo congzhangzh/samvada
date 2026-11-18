@@ -136,6 +136,24 @@ class State:
                 out[scope] = value
         return out
 
+    # -- profile -----------------------------------------------------------------------
+    def set_profile(self, session: bool, name: str) -> None:
+        _write(self.scope_dir(session) / "profile", name + "\n")
+
+    def reset_profile(self, session: bool) -> None:
+        (self.scope_dir(session) / "profile").unlink(missing_ok=True)
+
+    def profile(self, env: Mapping[str, str] = os.environ) -> Setting:
+        """The voice profile in force: $SAMVADA_PROFILE, else session, else global, else
+        `balanced` (the package's own defaults, what a release ships)."""
+        if env.get("SAMVADA_PROFILE"):
+            return Setting(env["SAMVADA_PROFILE"], "env")
+        for scope, d in self._dirs():
+            value = (_read(d / "profile") or "").strip()
+            if value:
+                return Setting(value, scope)
+        return Setting("balanced", "default")
+
     # -- online mode -------------------------------------------------------------------
     def set_online(self, session: bool, mode: str) -> None:
         if mode not in ONLINE_MODES:

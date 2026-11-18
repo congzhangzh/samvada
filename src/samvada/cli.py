@@ -13,8 +13,10 @@ from .speak import say, speak
 from .state import ONLINE_MODES, State, session_key
 
 USAGE = """\
-usage: samvada speak [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
-                                       play in this order (--save: write the clips, play nothing)
+usage: samvada speak [--wait] [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
+                                       play in this order, in its turn, in the background:
+                                       returns when the clips are made (--wait: when heard;
+                                       --save: write the clips, play nothing)
        samvada <lang> "<text>" ...     the same
        samvada status                  where the voice goes now and why; languages; online mode
        samvada [--session] mute ["<why>"] | unmute
@@ -25,14 +27,34 @@ usage: samvada speak [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
        samvada [--session] online [off|fallback|always]     default off: local voices only
        samvada presence [phone]        phone: the owner just wrote from the phone
        samvada voices [list]           the voice packs: installed where, size, engine
-       samvada voices add <lang>... [--engine auto|always|never]
+       samvada voices add <lang>... [--kokoro] [--engine auto|always|never]
                                        verify and install, from its samvada-voice-<lang>
-                                       package when installed, else downloaded once
+                                       package when installed, else downloaded once;
+                                       --kokoro: the Kokoro fallback for en, zh (full models)
        samvada voices verify [<lang>...] | remove <lang>...
+       samvada voices pick [<lang>...] [--dir DIR]... [--plain | --table]
+                                       listen to each voice file of a language and choose one
+                                       (no language: all, ←→ between them); saved in
+                                       ~/.config/samvada/voices.toml (voices.local.toml still
+                                       wins); --dir: more folders, remembered for next time,
+                                       with <lang>_*.onnx files or a folder per language
+                                       (DIR/en/, DIR/ja/); --table: every voice as a table
+                                       (who, terms, your note), nothing played
+       samvada doctor                  check every voice, engine, config file and player
        samvada setup [--agent claude|codex] [--native zh] [--langs en,zh] [--ipa|--no-ipa]
                      [--speak-alias[=replace]|--no-speak-alias] [--dry-run] [--uninstall]
                                        the tutor's rule, the skill and the hooks for an agent;
                                        --speak-alias adds a `speak` command for samvada speak
+       samvada [--session] profile [use <name> | reset | list]
+                                       voice profiles: balanced (the package's defaults, what a
+                                       release ships) and yours (any name, in
+                                       ~/.config/samvada/profiles/<name>.toml)
+       samvada engines [stop]          the warm engines running (Kokoro, VOICEVOX keep their
+                                       model loaded between sentences); stop: stop them all
+       samvada config [--list|-l]      each voice's engine, model and online voice, and where
+                                       it came from: default, yours or $SAMVADA_VOICE_MAP
+       samvada config --init           start ~/.config/samvada/voices.local.toml (only when
+                                       none exists; Samvada never writes it after that)
        samvada hook prompt|stop        run by the agent's hooks (JSON on stdin)
        samvada version
 
@@ -41,6 +63,10 @@ env        SAMVADA=on|off  force playing or silence for one call
            SAMVADA_ONLINE=off|fallback|always  the online mode for one call
            SAMVADA_DEBUG=1  show engine output;  SAMVADA_SESSION=<key>
            SAMVADA_VOICES=<dir>  SAMVADA_ENGINES=<dir>  the folders of the voices and engines
+           SAMVADA_VOICE_MAP=<file>  a whole other voice map, in place of the defaults and yours
+           SAMVADA_WAIT=1  speak waits until its message is heard
+           SAMVADA_PROFILE=<name>  the profile for one call; SAMVADA_WARM=off  no warm engines;
+           SAMVADA_WARM_IDLE=<s>  how long a warm engine waits for a sentence (600)
            HF_ENDPOINT, HF_TOKEN  a Hugging Face mirror; a token against rate limits (optional)
 exit       0 played, or silent by decision; 1 a language failed; 2 bad usage"""
 
@@ -72,6 +98,9 @@ def _show(state: State, voices: dict, full: bool) -> None:
             note = "  (edge-tts is not installed: pip install 'samvada[online]')"
         print(f"online: {mode.value} ({mode.where}){note}")
         print("voices: " + "  ".join(str(d) for d in paths.voices_dirs()))
+        for lang, voice in voices.items():
+            print(f"  {lang}: " + " → ".join(engines.order(voice, paths.voices_dirs(),
+                                                            mode.value)))
     print(f"session: {state.key or 'none (no Claude session, pys window or tty)'}")
 
 
@@ -171,7 +200,6 @@ def _pairs(args: list[str], voices: dict) -> list[tuple[str, str]]:
 
 def run(argv: list[str]) -> int:
     env = os.environ
-    voices = engines.load_voices()
     state = State(paths.state_dir(env), session_key(env), legacy=paths.legacy_state_dir(env))
     session = bool(argv) and argv[0] in ("--session", "-s")
     if session:
@@ -184,10 +212,44 @@ def run(argv: list[str]) -> int:
     if cmd == "version":
         print(f"samvada {__version__}")
         return 0
-    if cmd == "status":
-        print(where(state, _phone_marks(state)))
-        _show(state, voices, full=True)
+    if cmd == "setup":
+        from .agents import setup
+        return setup.main(rest)
+    if cmd == "hook":
+        from .agents import hooks
+        if rest not in (["prompt"], ["stop"]):
+            raise Usage("usage: samvada hook prompt|stop")
+        return hooks.run(rest[0], state, lambda st: where(st, _phone_marks(st)))
+    if cmd == "config":
+        return _config(rest, env)
+    if cmd == "profile":
+        return _profile(rest, session, state, env)
+    if cmd == "engines":
+        from . import warm
+        if rest == ["stop"]:
+            print(f"stopped {warm.stop_all(env)} warm engine(s)")
+            return 0
+        if rest:
+            raise Usage("usage: samvada engines [stop]")
+        found = warm.running(env)
+        if not warm.enabled(env):
+            print("warm engines: off ($SAMVADA_WARM)")
+        for s_ in found:
+            if s_.get("busy"):
+                print(f"{'busy':<9}     pid {s_['pid']}  (making a sentence now; {s_['socket']})")
+                continue
+            print(f"{s_['engine']:<9} {s_['lang']}  pid {s_['pid']}  up {s_['up_s']} s  "
+                  f"served {s_['served']}  loaded in {s_['loaded_s']} s  {s_.get('mb', '?')} MB  "
+                  f"{s_['model']}")
+        if not found:
+            print("no warm engine running (each starts with its first sentence, and exits "
+                  f"after {os.environ.get('SAMVADA_WARM_IDLE', warm.IDLE)} s idle)")
         return 0
+    if cmd == "doctor":
+        from . import doctor
+        if rest:
+            raise Usage("usage: samvada doctor")
+        return doctor.run(state, env)
     if cmd == "mute":
         state.mute(session, rest[0] if rest else "muted by hand")
         print(where(state, _phone_marks(state)))
@@ -196,8 +258,6 @@ def run(argv: list[str]) -> int:
         state.unmute(session)
         print(where(state, _phone_marks(state)))
         return 0
-    if cmd == "lang":
-        return _lang(rest, session, state, voices)
     if cmd == "online":
         if rest:
             if len(rest) != 1 or rest[0] not in ONLINE_MODES:
@@ -215,22 +275,31 @@ def run(argv: list[str]) -> int:
             raise Usage("usage: samvada presence [phone]")
         print(where(state, _phone_marks(state)))
         return 0
+    try:
+        voices = engines.load_voices(env=env)  # after the hooks: a typo in the owner's file
+    except engines.VoiceMapError as e:
+        if cmd != "voices":
+            raise
+        say(f"{e}; the picker and the lists use Samvada's own voices meanwhile")
+        voices = engines.load_voices(env={**env, "SAMVADA_VOICE_MAP": str(engines.package_map_path())})
+    # must not break the agent's turn, only the commands that speak or list
+    if cmd == "status":
+        print(where(state, _phone_marks(state)))
+        _show(state, voices, full=True)
+        return 0
+    if cmd == "lang":
+        return _lang(rest, session, state, voices)
     if cmd == "voices":
         return _voices(rest, voices)
-    if cmd == "setup":
-        from .agents import setup
-        return setup.main(rest)
-    if cmd == "hook":
-        from .agents import hooks
-        if rest not in (["prompt"], ["stop"]):
-            raise Usage("usage: samvada hook prompt|stop")
-        return hooks.run(rest[0], state, lambda st: where(st, _phone_marks(st)))
     if session:
-        raise Usage("--session goes with mute, unmute, lang or online")
+        raise Usage("--session goes with mute, unmute, lang, online or profile")
 
-    save = None
+    save, wait = None, False
     if cmd == "speak":
         argv = rest
+        wait = argv[:1] == ["--wait"]
+        if wait:
+            argv = argv[1:]
         if argv[:1] == ["--save"]:
             if len(argv) < 2:
                 raise Usage("usage: samvada speak --save DIR <lang> \"text\" ...")
@@ -244,27 +313,132 @@ def run(argv: list[str]) -> int:
             say(f"silent, {decision.why}")
             return 0
     return speak(pairs, state=state, voices=voices, voices_dirs=paths.voices_dirs(env), env=env,
-                 save=save)
+                 save=save, wait=cmd == "speak" and wait)
+
+
+CONFIG_TEMPLATE = """\
+# Your voice overrides. Samvada never writes this file: no command, no `samvada setup`, no
+# upgrade. Name only what you change; the rest comes from Samvada's own voices.toml, so a
+# later release still fixes it. `samvada config --list` shows each value and where it came from.
+#
+# model: a file name in a voices folder (`samvada voices` lists them), or a path (~ works).
+#
+# [en]
+# model = "~/voices/en_GB-jenny_dioco-medium.onnx"
+#
+# [zh.env]
+# HF_HUB_OFFLINE = "1"
+#
+# [de]                    # a new language needs engine, model and online
+# engine = "piper"
+# model = "de_DE-thorsten-high.onnx"
+# online = "de-DE-KatjaNeural"
+"""
+
+
+def _profile(rest: list[str], session: bool, state, env) -> int:
+    """`[--session] profile [use <name> | reset | list]`."""
+    built = engines.builtin_profiles()
+    if rest[:1] == ["use"] and len(rest) == 2:
+        name = rest[1]
+        if not engines.PROFILE_NAME.match(name):
+            raise Usage(f"a profile name is letters, digits, . _ - (at most 32): {name}")
+        state.set_profile(session, name)
+        if name not in built and name not in engines.own_profiles(env):
+            print(f"{name} is a new profile: `samvada voices pick` fills it "
+                  f"({paths.profiles_dir(env) / (name + '.toml')})")
+    elif rest == ["reset"]:
+        state.reset_profile(session)
+    elif rest not in ([], ["list"]):
+        raise Usage("usage: samvada [--session] profile [use <name> | reset | list]")
+    name, where = engines.active_profile(env)
+    print(f"profile: {name} ({where})")
+    own = engines.own_profiles(env)
+    for n in sorted(set(built) | set(own)):
+        kinds = ([("built in" if built[n] else "built in: the package's defaults")] if n in built else [])
+        if n in own:
+            kinds.append(f"yours: {paths.profile_file(n, env)}")
+        print(f"  {'●' if n == name else ' '} {n:<12} {'; '.join(kinds)}")
+    voices = engines.load_voices(env=env)
+    for line in engines.SKIPPED:
+        print(f"  note: {line}; the default speaks")
+    return 0
+
+
+def _config(rest: list[str], env) -> int:
+    """`config [--list|-l]`: every voice key, its value and its layer; `config --init`."""
+    own = paths.owner_voices_file(env)
+    if rest == ["--init"]:
+        if own.exists():
+            print(f"{own} exists; left as it is")
+            return 0
+        own.parent.mkdir(parents=True, exist_ok=True)
+        own.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+        print(f"wrote {own} (all commented out; edit it by hand)")
+        return 0
+    if rest not in ([], ["--list"], ["-l"]):
+        raise Usage("usage: samvada config [--list|-l] | --init")
+    voices = engines.load_voices(env=env)
+    files = {name: f for name, f in engines.layers(env)}
+    print(f"{'voice':<6} {'key':<16} {'value':<40} from")
+    for lang, v in voices.items():
+        rows = [("engine", v.engine), ("model", v.model), ("online", v.online)]
+        rows += [(f"env.{k}", val) for k, val in v.env.items()]
+        for key, value in rows:
+            layer = v.origin.get(key, "default")
+            where_ = f" ({files[layer]})" if files.get(layer) else ""
+            print(f"{lang:<6} {key:<16} {value:<40} {layer}{where_}")
+    print("files (highest first):")
+    if "map" in files:
+        print(f"  {files['map']} ($SAMVADA_VOICE_MAP, the whole map; the others are not read)")
+    pname, pwhere = engines.active_profile(env)
+    pfile = paths.profile_file(pname, env)
+    built = engines.builtin_profiles().get(pname)
+    for f, what in ((own, "yours, by hand"), (pfile, f"profile {pname} ({pwhere}), yours")):
+        print(f"  {f} ({what}; {'read' if f in files.values() else 'none' if not f.exists() else 'not read'})")
+    if built is not None:
+        print(f"  {built} (profile {pname}, built in)")
+    for line in engines.SKIPPED:
+        print(f"  note: {line}; the default speaks")
+    print("  samvada's own voices.toml (the defaults)")
+    return 0
+
+
+def lock_packs(lock) -> list[str]:
+    return sorted({f.pack for f in lock.files})
 
 
 def _voices(rest: list[str], voices: dict) -> int:
     lock = packs.load_lock()
     home = paths.install_voices_dir()
     sub, args = (rest[0], rest[1:]) if rest else ("list", [])
+    if sub == "pick":
+        from . import pick
+        return pick.main(args, voices)
     engine_mode = "auto"
+    kokoro = "--kokoro" in args
+    if kokoro:
+        args = [a for a in args if a != "--kokoro"]
     if "--engine" in args:
         i = args.index("--engine")
         if i + 1 >= len(args) or args[i + 1] not in ("auto", "always", "never"):
             raise Usage("--engine auto|always|never")
         engine_mode = args[i + 1]
         del args[i:i + 2]
-    unknown = [l for l in args if l not in voices]
+    unknown = [l for l in args if l not in voices and l not in lock_packs(lock)]
     if unknown:
         raise Usage(f"unknown language {unknown[0]} (one of: {' '.join(voices)})")
 
     if sub == "list" and not args:
         dirs = paths.voices_dirs()
         for lang, voice in voices.items():
+            if voice.fallback is not None and lock.pack(f"{lang}-kokoro"):
+                fb = voice.fallback
+                fhome = engines.voice_home(fb, dirs)
+                print(f"{lang}-kokoro  {'installed in ' + str(fhome) if fhome else 'not installed'}  "
+                      f"({packs.sizes_line(lock, f'{lang}-kokoro')})  engine kokoro: "
+                      f"{engines.engine_where('kokoro')}  (the fallback; add: samvada voices add "
+                      f"{lang} --kokoro)")
             found = engines.voice_home(voice, dirs)
             where_ = f"installed in {found}" if found else "not installed"
             pkg = voicepkg.find(lang)
@@ -279,6 +453,12 @@ def _voices(rest: list[str], voices: dict) -> int:
         print(f"install folder: {home}")
         return 0
     if sub == "add" and args:
+        if kokoro:  # en zh --kokoro: the Kokoro packs (and the engine), not Piper's
+            missing = [l for l in args if not lock.pack(f"{l.split('-')[0]}-kokoro")]
+            if missing:
+                raise Usage(f"no Kokoro pack for {' '.join(missing)} (Kokoro packs: "
+                            f"{' '.join(p for p in lock_packs(lock) if p.endswith('-kokoro'))})")
+            args = [f"{l.split('-')[0]}-kokoro" for l in args]
         total = sum(lock.size(l) for l in args)
         print(f"samvada: installing {' '.join(args)} into {home} (up to {packs.mb(total)})")
         status = 0
@@ -286,7 +466,7 @@ def _voices(rest: list[str], voices: dict) -> int:
             try:
                 got = packs.add(lang, lock, home, os.environ)
                 print(f"{lang}: {'installed' if got else 'already installed'}, verified")
-                engine = voices[lang].engine
+                engine = "kokoro" if lang.endswith("-kokoro") else voices[lang].engine
                 where_ = engines.engine_where(engine)
                 if where_ != "samvada" and (engine_mode == "always"
                                             or (engine_mode == "auto" and where_ == "missing")):
@@ -298,7 +478,8 @@ def _voices(rest: list[str], voices: dict) -> int:
         return status
     if sub == "verify":
         status = 0
-        for lang in args or list(voices):
+        mine = packs.installed(home)  # every language's pack, and the Kokoro fallback packs
+        for lang in args or list(voices) + [p for p in mine if p not in voices]:
             if lang not in packs.installed(home):
                 print(f"{lang}: not installed by samvada in {home}; not verified")
                 continue
@@ -311,7 +492,8 @@ def _voices(rest: list[str], voices: dict) -> int:
             packs.remove(lang, lock, home)
             print(f"{lang}: removed from {home}")
         return 0
-    raise Usage("usage: samvada voices [list | add <lang>... | verify [<lang>...] | remove <lang>...]")
+    raise Usage("usage: samvada voices [list | add <lang>... | verify [<lang>...] | remove <lang>... "
+                "| pick [<lang>...] [--dir DIR]...]")
 
 
 def _safe_streams() -> None:

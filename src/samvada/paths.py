@@ -22,6 +22,40 @@ def legacy_state_dir(env: Mapping[str, str] = os.environ) -> Path:
     return _xdg(env, "XDG_STATE_HOME", ".local/state") / "speak"
 
 
+def config_dir(env: Mapping[str, str] = os.environ) -> Path:
+    """The owner's own files: `voices.local.toml` (by hand only), `voices.toml` (the picker's
+    record) and `tutor.toml` (setup's record)."""
+    return _xdg(env, "XDG_CONFIG_HOME", ".config") / "samvada"
+
+
+def owner_voices_file(env: Mapping[str, str] = os.environ) -> Path:
+    """The owner's voice overrides: written by hand only; no Samvada command, `setup` or
+    upgrade ever writes it (DESIGN 6.1)."""
+    return config_dir(env) / "voices.local.toml"
+
+
+def picked_voices_file(env: Mapping[str, str] = os.environ) -> Path:
+    """The picker's record (`samvada voices pick`): Samvada writes it; `voices.local.toml`
+    wins over it."""
+    return config_dir(env) / "voices.toml"
+
+
+def profiles_dir(env: Mapping[str, str] = os.environ) -> Path:
+    """The owner's own profiles: `<name>.toml`, each over the built-in profile of that name;
+    `samvada voices pick` writes the one in force."""
+    return config_dir(env) / "profiles"
+
+
+def profile_file(name: str, env: Mapping[str, str] = os.environ) -> Path:
+    """The owner's file for a profile. For `like`, the picker's older `voices.toml` stands in
+    while `profiles/like.toml` does not exist (the file before profiles)."""
+    f = profiles_dir(env) / f"{name}.toml"
+    legacy = picked_voices_file(env)
+    if name == "like" and not f.exists() and legacy.is_file():
+        return legacy
+    return f
+
+
 def data_dir(env: Mapping[str, str] = os.environ) -> Path:
     return _xdg(env, "XDG_DATA_HOME", ".local/share") / "samvada"
 

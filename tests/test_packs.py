@@ -242,3 +242,44 @@ def test_a_narrow_console_does_not_crash_the_install(env, hub):
     r = env.run("voices", "add", "en", "--engine", "never", PYTHONIOENCODING="cp1252")
     assert r.returncode == 0, r.stderr
     assert "Traceback" not in r.stderr and (hub.own / "en_US-lessac-high.onnx").is_file()
+
+
+def kokoro_entries(hub, env) -> list[dict]:
+    """Kokoro packs pinned like the real ones: release asset URLs (no Hub path)."""
+    files = {"kokoro/v1.0/kokoro-v1.0.onnx": b"K" * 3000, "kokoro/v1.0/voices-v1.0.bin": b"V" * 700}
+    out = []
+    for dest, data in files.items():
+        hub.put(f"rel/{Path(dest).name}", data)
+        out.append({"pack": "en-kokoro", "url": f"{hub.endpoint}/rel/{Path(dest).name}",
+                    "dest": dest, "unpack": "", "size": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest()})
+    return out
+
+
+def test_add_kokoro_installs_the_fallback_pack_not_piper(env, hub):
+    write_lock(Path(env.vars["SAMVADA_VOICE_LOCK"]), hub.entries + kokoro_entries(hub, env))
+    r = env.run("voices", "add", "en", "--kokoro", "--engine", "never")
+    assert r.returncode == 0, r.stderr
+    assert "en-kokoro: installed, verified" in r.stdout
+    assert (hub.own / "kokoro" / "v1.0" / "kokoro-v1.0.onnx").read_bytes() == b"K" * 3000
+    assert not (hub.own / "en_US-lessac-high.onnx").exists()        # Piper's pack untouched
+    assert any(h.startswith("/rel/") for h in hub.hits)
+    r = env.run("voices", "verify")
+    assert "en-kokoro: verified" in r.stdout
+    r = env.run("voices")
+    assert "en-kokoro  installed in" in r.stdout and "(the fallback; add: samvada voices add en --kokoro)" in r.stdout
+    r = env.run("voices", "add", "fr", "--kokoro")
+    assert r.returncode == 2 and "no Kokoro pack for fr" in r.stderr
+
+
+def test_add_kokoro_installs_the_kokoro_engine(env, hub, monkeypatch):
+    """`--kokoro` installs the engine kokoro (its locked requirements), not the language's."""
+    from samvada import cli, packs
+    write_lock(Path(env.vars["SAMVADA_VOICE_LOCK"]), hub.entries + kokoro_entries(hub, env))
+    for k, v in env.vars.items():
+        monkeypatch.setenv(k, v)
+    calls = []
+    monkeypatch.setattr(packs, "install_engine", lambda engine, root, log=print: calls.append(engine))
+    assert cli.main(["voices", "add", "en", "--kokoro"]) == 0
+    assert calls == ["kokoro"]
+    assert "kokoro-onnx==0.6.1" in packs.engine_requirements("kokoro")

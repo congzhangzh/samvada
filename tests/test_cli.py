@@ -17,7 +17,9 @@ def test_bare_language_form_and_engines(env):
     assert r.returncode == 0
     lines = env.lines()
     assert lines[0].startswith("piper-plus tsukuyomi")
-    assert lines[2].startswith("piper zh_CN")
+    # the zh clip is made while the ja clip plays (the player starts with the first clip)
+    assert any(l.startswith("piper zh_CN") for l in lines)
+    assert [l for l in lines if l.startswith("play ")] == ["play 1-ja.wav", "play 2-zh.wav"]
     assert f"cwd={env.voices}" in lines[0]  # engines run in the voices folder (g2pW)
 
 
@@ -205,7 +207,10 @@ def test_status_lines(env):
     assert out[0] == "on at the desktop (idle 3s, gnome)"
     assert out[1].startswith("languages: en on(default)")
     assert out[2] == "online: off (default)"
-    assert out[4] == "session: test-session"
+    # each language's order: its voice, its fallback (en, zh: Kokoro), then online
+    assert "  en: piper en_US-lessac-high → kokoro af_heart (no voice pack; samvada voices add en --kokoro) → online: off" in out
+    assert "  ja: piper-plus tsukuyomi-chan-6lang-fp16 → online: off" in out
+    assert out[-1] == "session: test-session"
 
 
 def test_migration_copies_speak_state_once(env):

@@ -1,0 +1,56 @@
+# Facts about voice files, shown by `samvada voices pick` beside each one, keyed by file name.
+# Facts only (who speaks, the accent, the data, the terms); how a voice sounds is the
+# owner's own note (`n` in the picker, kept in ~/.config/samvada/voice-notes.toml).
+# "(unchecked)" marks a fact from memory, not yet read in the voice's own documents.
+
+["en_US-lessac-high.onnx"]
+note = "US English, one female reader of audiobooks (the Blizzard Challenge 2013 data; unchecked)"
+terms = "research licence of the Lessac data"
+
+["en_GB-jenny_dioco-medium.onnx"]
+note = "Jenny, an Irish woman (Piper files it under en_GB), one microphone, 48 kHz; read news, novels, recipes, Wikipedia"
+terms = "commercial use allowed; an interface that speaks with it must name the voice \"Jenny (Dioco)\""
+
+["en_GB-alba-medium.onnx"]
+note = "Scottish English, one female speaker, from the University of Edinburgh's data (unchecked)"
+terms = "CC BY 4.0: credit the dataset"
+
+["en_US-amy-medium.onnx"]
+note = "US English, fine-tuned from Piper's hifi_tts_92 base model (the voice of Cori Samuel), data from Mycroft's mimic3 voices"
+terms = "the mimic3-voices repository is CC BY-SA 4.0 (Amy's own terms not stated)"
+
+["en_US-hfc_female-medium.onnx"]
+note = "the female speaker of Hi-Fi-CAPTAIN, NICT's (Japan) studio corpus of professional speakers in Japanese and English (unchecked: NICT's page was down)"
+terms = "CC BY-NC-SA 4.0: non-commercial, credit it, share changes alike"
+
+["zh_CN-xiao_ya-medium.onnx"]
+note = "Mandarin, one female speaker, Databaker's BZNSYP corpus of 10,000 sentences (unchecked)"
+terms = "non-commercial use"
+
+["tsukuyomi-chan-6lang-fp16.onnx"]
+note = "つくよみちゃん, a free character voice corpus; Piper Plus trains it for six languages"
+terms = "the Tsukuyomi-chan terms; credit: ■Piper Plus:つくよみちゃん"
+
+["fr_FR-siwis-medium.onnx"]
+note = "French, one female speaker, the SIWIS French speech synthesis database (unchecked)"
+terms = "CC BY 4.0: credit the dataset"
+
+["en_GB-cori-high.onnx"]
+note = "UK English, one female reader, about 24 hours of LibriVox audiobook recordings, trained at high quality"
+terms = "public domain"
+
+["en_GB-southern_english_female-low.onnx"]
+note = "Southern English, one female speaker, OpenSLR 83 (crowdsourced UK and Ireland English dialects; unchecked); low quality"
+terms = "CC BY-SA 4.0: credit it, share changes alike"
+
+["en_US-kristin-medium.onnx"]
+note = "US English, one female reader, about 11.5 hours of LibriVox audiobook recordings"
+terms = "public domain"
+
+["en_US-ljspeech-high.onnx"]
+note = "US English, the LJ Speech dataset: one female reader of non-fiction books (Linda Johnson; unchecked)"
+terms = "public domain"
+
+["en_US-kathleen-low.onnx"]
+note = "US English, one speaker, Rhasspy's Kathleen dataset (female: unchecked); low quality"
+terms = "CC0 (no conditions)"
