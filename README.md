@@ -3,8 +3,8 @@
 **A voice for AI agents, offline first.** The agent decides what to say; Samvada decides
 whether, where and how it is heard. *Samvada* (संवाद, *saṃvāda*) means dialogue.
 
-- **Offline first.** Local voices (Piper) for English and Chinese, French and Japanese as
-  optional packs. Online voices (edge-tts) are **off by default**, so your text never leaves
+- **Offline first.** Local voices (Piper) for English, Chinese, Japanese and French, each a
+  pack you add once. Online voices (edge-tts) are **off by default**, so your text never leaves
   the machine unless you turn them on.
 - **Plays only where you are.** Silent when the screen is locked, when you are muted, or when
   your last input came from your phone instead of this desk. Silence is never an error.
@@ -18,9 +18,16 @@ Status: alpha. Linux (GNOME) is the tested platform.
 ## Install
 
 ```bash
-uv tool install samvada          # or: pipx install samvada, pip install samvada
-samvada voices add en zh         # once: about 290 MB, downloaded and verified
+uv tool install samvada          # or: pip install samvada
+samvada voices add en zh ja fr   # once, the languages you want: each voice and its engine
 ```
+
+Each language's voice is one wheel on samvada's GitHub release `voices-<version>` (en 106 MB,
+zh 172, ja 38, fr 58). `samvada voices add` downloads it, checks it against the sha256 Samvada
+pins, and installs every file only after checking it against `voices.lock`; if GitHub fails, it
+takes the same files from Hugging Face one by one. `SAMVADA_VOICES_URL` points it at a mirror
+of the release. A wheel can also be installed with pip (`pip install <its URL>`); `samvada`
+then takes the voice from it with no network.
 
 ## Use
 
@@ -46,8 +53,11 @@ Exit codes: `0` played, or silent by decision; `1` a language failed; `2` bad us
 
 Every file a pack needs is pinned in `src/samvada/voices.lock`: a commit on the
 [Hugging Face Hub](https://huggingface.co) (or a URL at a commit), with its size and sha256.
-`samvada voices add` downloads from the Hub's resolve URLs, resumes partial downloads, and
-checks every file before putting it in place. Nothing needs configuring; optionally
+`samvada voices add` takes the files from an installed `samvada-voice-<lang>` package, else
+from the language's wheel on the GitHub release (pinned in `src/samvada/voice-packages.toml`),
+else from the Hub's resolve URLs, resuming partial downloads, and checks every file against the
+lock before putting it in place, wherever it came from (`SAMVADA_VOICE_PACKAGES=off` skips the
+packages, installed or on GitHub). Nothing needs configuring; optionally
 `HF_ENDPOINT` points at a mirror and `HF_TOKEN` lifts anonymous rate limits.
 
 | Pack | Voice | Engine | Source |
@@ -57,7 +67,11 @@ checks every file before putting it in place. Nothing needs configuring; optiona
 | ja | Tsukuyomi-chan | piper-plus | `ayousanz/piper-plus-tsukuyomi-chan` + NLTK data |
 | fr | `fr_FR-siwis-medium` | Piper | `rhasspy/piper-voices` |
 
-Each voice keeps its own license; see its model card on the Hub before you redistribute it.
+Each voice keeps its own terms, which Samvada's MIT license does not cover: en, trained on the
+Lessac (Blizzard 2013) data under its research licence; zh, trained on Databaker's BZNSYP,
+non-commercial use; ja, the terms of Piper Plus Tsukuyomi-chan and of its corpus, with the
+credit **■Piper Plus:つくよみちゃん**; fr, SIWIS, CC-BY 4.0. `src/samvada/voices.toml` links each
+one; read them on the model cards before you use or redistribute a voice.
 
 ## Where things live
 

@@ -1,10 +1,22 @@
 # The release pipeline. A tag v<version> builds, tests and publishes; a manual run
-# (workflow_dispatch) does everything except publishing: the dry run before every tag.
+# (workflow_dispatch) does everything except publishing: the dry run before every tag. A manual
+# run with publish-voices publishes the voice packages PyPI lacks and nothing else (no bundles),
+# so samvada can pin them in its next release (publish.sh --voices).
 #
 #   test      the suite on every supported Python (fake engines: no audio, no network)
 #   build     the wheel and the sdist; on a tag, the tag must equal the package version
-#   install   a clean install of the built wheel, as a user does it
-#   pypi      on a tag only: PyPI through Trusted Publishing (environment pypi, no token)
+#   voices    the voice packages, samvada-voice-<lang> (release/voice_packages.py): built,
+#             checked against src/samvada/voice-packages.toml (what `voices add` downloads), then
+#             the ones PyPI does not have yet; a version PyPI has must be the same
+#   install   a clean install of the built wheel, as a user does it; the voices from the voice
+#             package wheels served as the GitHub release serves them, and from the installed
+#             packages, both with the network to the Hub closed
+#   github-voices  on a tag only: the GitHub release voices-<voice-packages version> with the
+#             four wheels, made once; a release of that name must hold the same SHA256SUMS
+#   pypi      on a tag only: samvada to PyPI through Trusted Publishing (environment pypi, no
+#             token), after its voices are on GitHub; no voice package (en and zh wait for
+#             PyPI's limit raise, pypi/support#13115 and #13116)
+#   pypi-voices  on a manual run with publish-voices only: the new voice packages, nothing else
 #   bundle    standalone bundles built and tested on each system (Windows arm64: its engines
 #             compiled first, PyPI has no wheel for them there)
 #   github    on a tag only: a GitHub release with the wheel, the sdist and the bundles
@@ -13,7 +25,12 @@ name: release
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      publish-voices:
+        description: "Publish the voice packages PyPI lacks to PyPI (nothing else; no bundles)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,6 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      voices: ${{ steps.version.outputs.voices }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3 (no floating v10 tag)
@@ -41,6 +59,7 @@ jobs:
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "voices=$(sed -n 's/^voice-packages = "\(.*\)"$/\1/p' pyproject.toml)" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "tag $GITHUB_REF_NAME does not match the package version $version" >&2
             exit 1
@@ -52,14 +71,43 @@ jobs:
           name: dist
           path: dist
 
+  voices:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3 (no floating v10 tag)
+      - uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/download-cache
+          key: voices-${{ hashFiles('src/samvada/voices.lock') }}
+      - run: |
+          uv run python release/voice_packages.py --out "$RUNNER_TEMP/voice-packages" \
+            --cache "$RUNNER_TEMP/download-cache" --pypi-plan voice-upload
+          mv "$RUNNER_TEMP"/voice-packages/*/ voice-packages
+          ls -l voice-packages voice-upload && cat voice-packages/SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: voice-packages
+          path: voice-packages
+      - uses: actions/upload-artifact@v7
+        with:
+          name: voice-upload
+          path: voice-upload
+          if-no-files-found: ignore
+
   install:
-    needs: build
+    needs: [build, voices]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: voice-packages
+          path: voice-packages
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3 (no floating v10 tag)
       - run: |
           uv venv --python 3.12 /tmp/user
@@ -69,9 +117,24 @@ jobs:
           samvada voices
           SAMVADA=off samvada speak en "hello"
           samvada status
+      - name: the voices from the wheels as the GitHub release serves them, the Hub closed
+        run: |
+          (cd voice-packages && python3 -m http.server 8765 --bind 127.0.0.1 &) && sleep 1
+          export PATH=/tmp/user/bin:$PATH HOME=$(mktemp -d) HF_ENDPOINT=http://127.0.0.1:9 \
+            SAMVADA_VOICES_URL=http://127.0.0.1:8765/
+          samvada voices add en zh ja fr --engine never
+          samvada voices verify en zh ja fr
+      - name: the voices from the installed voice packages, the Hub closed
+        run: |
+          uv pip install --python /tmp/user/bin/python --no-index --find-links voice-packages \
+            samvada-voice-en samvada-voice-zh samvada-voice-ja samvada-voice-fr
+          export PATH=/tmp/user/bin:$PATH HOME=$(mktemp -d) HF_ENDPOINT=http://127.0.0.1:9
+          samvada voices add en zh ja fr --engine never
+          samvada voices verify en zh ja fr
 
   bundle:
     needs: test
+    if: ${{ !inputs.publish-voices }}
     strategy:
       fail-fast: false
       matrix:
@@ -138,8 +201,43 @@ jobs:
           path: ${{ runner.temp }}/samvada-build/bundles/samvada-*
           compression-level: 0
 
+  github-voices:
+    needs: [voices, install]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: voice-packages
+          path: voice-packages
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          vp=$(jq -r .version voice-packages/voice-packages.json)
+          tag="voices-$vp"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --output theirs
+            if cmp -s theirs voice-packages/SHA256SUMS; then
+              echo "$tag is on GitHub with the same SHA256SUMS"; exit 0
+            fi
+            echo "$tag on GitHub differs from this build; bump [tool.samvada] voice-packages" >&2
+            diff theirs voice-packages/SHA256SUMS >&2; exit 1
+          fi
+          cat > notes.md <<EOF
+          The voices of samvada, one voice package wheel per language (data only, the files
+          byte for byte as pinned in samvada's voices.lock). samvada voices add <lang>
+          downloads the language's wheel from here, checks it and installs the voice, so you
+          don't need to fetch these yourself. Each voice keeps its own terms: see the README
+          inside its wheel.
+          EOF
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "samvada voices $vp" --notes-file notes.md --latest=false \
+            voice-packages/*.whl voice-packages/SHA256SUMS
+
   pypi:
-    needs: [build, install]
+    needs: [build, install, github-voices]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     environment:
@@ -155,6 +253,30 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+  pypi-voices:
+    needs: [voices, install]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish-voices
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/user/congzhangzh/
+    permissions:
+      id-token: write # Trusted Publishing: each voice project has this workflow's publisher
+    steps:
+      - uses: actions/download-artifact@v8
+        continue-on-error: true  # no artifact: PyPI has every voice package of this version
+        with:
+          name: voice-upload
+          path: voice-upload
+      - id: voices
+        run: |
+          echo "count=$(ls voice-upload/*.whl 2>/dev/null | wc -l)" >> "$GITHUB_OUTPUT"
+          ls -l voice-upload 2>/dev/null || echo "PyPI has every voice package of this version"
+      - if: steps.voices.outputs.count != '0'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: voice-upload
 
   github:
     needs: [build, pypi, bundle]
@@ -176,9 +298,14 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
+          VOICES: ${{ needs.build.outputs.voices }}
         run: |
           cat > notes.md <<EOF
-          pip install samvada==$VERSION   (then: samvada voices add en zh)
+          pip install samvada==$VERSION   (or: uv tool install samvada)
+          samvada voices add en zh ja fr   (the languages you want)
+          Each voice comes from its wheel on the release voices-$VOICES, checked against
+          samvada's voices.lock; if GitHub fails, from Hugging Face, file by file. Each voice
+          keeps its own terms (VOICES.md, or the README inside its wheel).
 
           Standalone bundles: their own Python, both engines and the English, Chinese, Japanese
           and French voices; no network needed. Unpack, then run bin/samvada (Windows:

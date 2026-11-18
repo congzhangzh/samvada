@@ -20,6 +20,7 @@ back a `speak` that --speak-alias=replace had set aside).
 from __future__ import annotations
 
 import json
+import locale
 import os
 import re
 import shutil
@@ -31,7 +32,7 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
-from .. import engines, paths
+from .. import engines, packs, paths
 
 NAMES = {"en": "English", "zh": "Chinese", "ja": "Japanese", "fr": "French"}
 FLAGS = {"en": "🇺🇸 EN", "zh": "🇨🇳 ZH", "ja": "🇯🇵 JA", "fr": "🇫🇷 FR"}
@@ -45,10 +46,32 @@ ALIAS_TAG = "managed by `samvada setup --speak-alias`"
 
 @dataclass
 class Tutor:
-    native: str = "zh"
-    langs: tuple[str, ...] = ("en", "zh")
+    native: str = "en"
+    langs: tuple[str, ...] = ("en",)
     ipa: bool = True
     speak_alias: bool = False
+
+
+def locale_lang(env: Mapping[str, str] = os.environ) -> str:
+    """The user's language from the locale, as POSIX orders it (LC_ALL, LC_MESSAGES, LANG),
+    else what the system says (Windows); English when it is none of NAMES."""
+    names = [env.get(k, "") for k in ("LC_ALL", "LC_MESSAGES", "LANG")]
+    try:
+        names.append(locale.getlocale()[0] or "")
+    except ValueError:
+        pass
+    for name in names:
+        if name and name not in ("C", "POSIX") and not name.startswith("C."):
+            code = name.split("_")[0].split(".")[0].split("-")[0].lower()
+            return code if code in NAMES else "en"
+    return "en"
+
+
+def default_tutor(env: Mapping[str, str] = os.environ) -> Tutor:
+    """No settings yet: native from the locale (English when unknown), learning English, or
+    English alone for an English speaker."""
+    native = locale_lang(env)
+    return Tutor(native, tuple(l for l in NAMES if l in ("en", native)))
 
 
 def config_path(env: Mapping[str, str] = os.environ) -> Path:
@@ -57,11 +80,12 @@ def config_path(env: Mapping[str, str] = os.environ) -> Path:
 
 
 def load_tutor(env: Mapping[str, str] = os.environ) -> Tutor:
+    t = default_tutor(env)
     try:
         d = tomllib.loads(config_path(env).read_text())
     except (OSError, ValueError):
-        return Tutor()
-    return Tutor(d.get("native", "zh"), tuple(d.get("langs", ("en", "zh"))), bool(d.get("ipa", True)),
+        return t
+    return Tutor(d.get("native", t.native), tuple(d.get("langs", t.langs)), bool(d.get("ipa", True)),
                  bool(d.get("speak_alias", False)))
 
 
@@ -261,8 +285,20 @@ def plan(agent: str, t: Tutor, uninstall: bool, env: Mapping[str, str] = os.envi
         voices = engines.load_voices()
         dirs = paths.voices_dirs(env)
         missing = [l for l in t.langs if l in voices and not engines.has_pack(voices[l], dirs)]
+        lock = packs.load_lock()
+        boxed = [l for l in missing if packs.from_package(l, lock, env)]
+        rest = [l for l in missing if l not in boxed]
+        if boxed:
+            target = paths.install_voices_dir(env)
+
+            def install_boxed(boxed=boxed, target=target):
+                for l in boxed:
+                    packs.add(l, lock, target, env, log=lambda *a: None, offline=True)
+            steps.append(Step("voices", f"install {' '.join(boxed)} from the installed voice "
+                              f"packages into {target} (no network)", install_boxed))
         steps.append(Step("voices", "every language has its voice pack" if not missing else
-                          f"no voice pack for {' '.join(missing)}: samvada voices add {' '.join(missing)}"))
+                          (f"no voice pack for {' '.join(rest)}: samvada voices add {' '.join(rest)}"
+                           if rest else "the other languages have their voice packs")))
 
     # 5. the speak alias
     steps += _alias_steps(t, uninstall, replace, env)

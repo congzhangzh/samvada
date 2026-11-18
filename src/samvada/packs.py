@@ -1,9 +1,12 @@
 """Voice packs: download, verify, install and remove what a language needs (DESIGN 4.2, 8.4).
 
 A pack is every file of one language in voices.lock, plus the engine environment it runs in.
-Files come from the Hugging Face Hub at a pinned commit (or a URL at a commit) and are checked
-against their size and sha256 before they are put in place. No dependency: plain HTTP to the
-Hub's resolve URLs, which honours HF_ENDPOINT (a mirror) and HF_TOKEN (rate limits).
+Files come from an installed voice package (samvada-voice-<lang>, voicepkg.py), else from the
+language's voice package wheel on samvada's GitHub release (pinned in voice-packages.toml),
+else from the Hugging Face Hub at a pinned commit (or a URL at a commit), file by file. Each is
+checked against its size and sha256 before it is put in place, wherever it came from. No
+dependency: plain HTTP, which honours HF_ENDPOINT (a mirror) and HF_TOKEN (rate limits) for the
+Hub, SAMVADA_VOICES_URL for the GitHub release.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
-from . import __version__
+from . import __version__, voicepkg
 
 CHUNK = 1 << 20
 MARK = ".samvada-packs.json"  # in the voices folder: what each pack installed, by sha256
@@ -95,12 +98,49 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def fetch(f: File, out: Path, env: Mapping[str, str], log=print) -> None:
+def _download(url: str, part: Path, size: int, headers: dict[str, str], log, label: str) -> None:
+    """Download `url` into `part` up to `size` bytes, resuming what `part` already holds.
+    The caller checks the result."""
+    have = part.stat().st_size if part.exists() else 0
+    if have > size:
+        part.unlink()
+        have = 0
+    if have >= size:
+        return
+    headers = {"User-Agent": f"samvada/{__version__}", **headers}
+    if have:
+        headers["Range"] = f"bytes={have}-"
+    log(f"  {label} ← {url.split('?')[0]}")
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            mode = "ab" if have and r.status == 206 else "wb"
+            with part.open(mode) as fh:
+                while chunk := r.read(CHUNK):
+                    fh.write(chunk)
+    except OSError as e:
+        raise PackError(f"{label}: download failed: {e}") from e
+
+
+def fetch(f: File, out: Path, env: Mapping[str, str], log=print,
+          pkg: voicepkg.Package | None = None) -> None:
     """Download one file to `out`, resuming a partial download, and verify it.
 
-    $SAMVADA_DOWNLOAD_CACHE (a folder of files named by sha256) is used first and filled,
-    so building bundles again never downloads twice.
+    A voice package is used first (`pkg`, a downloaded wheel; else the installed one), then
+    $SAMVADA_DOWNLOAD_CACHE (a folder of files named by sha256, filled by downloads, so
+    building bundles again never downloads twice), then the Hub.
     """
+    pkg = pkg or voicepkg.find(f.pack, env)
+    if pkg and pkg.has(f.sha256):
+        if pkg.extract(f.sha256, out) and out.stat().st_size == f.size \
+                and _sha256(out) == f.sha256:
+            log(f"  {f.pack}: {f.dest} ({mb(f.size)}) ← {pkg.name} {pkg.version}")
+            return
+        out.unlink(missing_ok=True)
+        missing = f.dest in pkg.missing()
+        log(f"  {f.pack}: {pkg.name} {pkg.version} could not give {f.dest}"
+            + (" (missing from the package)" if missing else " (differs from voices.lock)")
+            + "; downloading it")
     cache = Path(env["SAMVADA_DOWNLOAD_CACHE"]) if env.get("SAMVADA_DOWNLOAD_CACHE") else None
     if cache and (cache / f.sha256).is_file():
         shutil.copyfile(cache / f.sha256, out)
@@ -108,27 +148,11 @@ def fetch(f: File, out: Path, env: Mapping[str, str], log=print) -> None:
             return
         out.unlink()
     part = out.with_name(out.name + ".part")
-    have = part.stat().st_size if part.exists() else 0
-    if have > f.size:
-        part.unlink()
-        have = 0
-    if have < f.size:
-        url = f.source_url(env)
-        headers = {"User-Agent": f"samvada/{__version__}"}
-        if f.repo and env.get("HF_TOKEN"):
-            headers["Authorization"] = f"Bearer {env['HF_TOKEN']}"
-        if have:
-            headers["Range"] = f"bytes={have}-"
-        log(f"  {f.pack}: {f.dest} ({mb(f.size)}) ← {url.split('?')[0]}")
-        req = urllib.request.Request(url, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                mode = "ab" if have and r.status == 206 else "wb"
-                with part.open(mode) as fh:
-                    while chunk := r.read(CHUNK):
-                        fh.write(chunk)
-        except OSError as e:
-            raise PackError(f"{f.dest}: download failed: {e}") from e
+    headers = {"Authorization": f"Bearer {env['HF_TOKEN']}"} if f.repo and env.get("HF_TOKEN") else {}
+    try:
+        _download(f.source_url(env), part, f.size, headers, log, f"{f.pack}: {f.dest} ({mb(f.size)})")
+    except PackError as e:
+        raise PackError(f"{f.dest}: download failed: {e.__cause__}") from e
     if part.stat().st_size != f.size or _sha256(part) != f.sha256:
         part.unlink()
         raise PackError(f"{f.dest}: size or sha256 does not match voices.lock; removed, try again")
@@ -185,15 +209,26 @@ def _hf_refs(home: Path, files: list[File]) -> None:
             ref.write_text(parts[4])
 
 
-def add(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log=print) -> int:
-    """Install one pack into `home`; returns the bytes downloaded (0 when already there)."""
+def from_package(lang: str, lock: Lock, env: Mapping[str, str]) -> voicepkg.Package | None:
+    """The installed voice package that holds every file of this pack, or None."""
+    pkg = voicepkg.find(lang, env)
+    files = lock.pack(lang)
+    return pkg if pkg and files and pkg.complete(files) else None
+
+
+def add(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log=print,
+        offline: bool = False) -> int:
+    """Install one pack into `home`; returns the bytes put in place (0 when already there).
+    offline: only from an installed voice package, never the network."""
     files = lock.pack(lang)
     if not files:
         raise PackError(f"no voice pack for {lang} in voices.lock")
+    if offline and from_package(lang, lock, env) is None:
+        raise PackError(f"{lang}: no complete samvada-voice-{lang} package installed")
     home.mkdir(parents=True, exist_ok=True)
     marks = _marks(home)
     done = marks.get(lang, {})
-    fetched = 0
+    todo = []
     for f in files:
         target = home / f.dest
         if f.unpack:
@@ -202,8 +237,59 @@ def add(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log=print) ->
         elif target.is_file() and target.stat().st_size == f.size and _sha256(target) == f.sha256:
             done[f.dest] = f.sha256
             continue
+        todo.append(f)
+    wheel = None
+    if todo and not offline and from_package(lang, lock, env) is None:
+        wheel = release_wheel(lang, lock, home, env, log, need=sum(f.size for f in todo))
+    try:
+        fetched = _put(lang, todo, home, env, log, wheel, marks, done)
+    finally:
+        if wheel:
+            wheel.close()
+            if not env.get("SAMVADA_DOWNLOAD_CACHE"):
+                wheel.folder.unlink(missing_ok=True)
+    _hf_refs(home, files)
+    marks[lang] = done
+    _save_marks(home, marks)
+    return fetched
+
+
+def release_wheel(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log=print,
+                  need: int = 0) -> voicepkg.Wheel | None:
+    """Download `lang`'s voice package wheel from samvada's GitHub release and open it; None
+    (and a line why) when there is none, it is much bigger than what is missing, or it fails:
+    the caller then goes to the Hub file by file. A partial download resumes next time."""
+    w = voicepkg.release_wheel(lang, lock.pack(lang), env)
+    if w is None or need * 2 < w["size"]:
+        return None
+    cache = Path(env["SAMVADA_DOWNLOAD_CACHE"]) if env.get("SAMVADA_DOWNLOAD_CACHE") else None
+    path = cache / w["sha256"] if cache else home / f".{w['file']}.download"
+    if not (path.is_file() and path.stat().st_size == w["size"] and _sha256(path) == w["sha256"]):
+        part = path.with_name(path.name + ".part")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _download(w["url"], part, w["size"], {}, log, f"{lang}: {w['file']} ({mb(w['size'])})")
+        except PackError as e:
+            log(f"  {lang}: the GitHub release failed ({e.__cause__}); file by file from the Hub")
+            return None
+        if part.stat().st_size != w["size"] or _sha256(part) != w["sha256"]:
+            part.unlink()
+            log(f"  {lang}: {w['file']} does not match voice-packages.toml; file by file from the Hub")
+            return None
+        part.replace(path)
+    wheel = voicepkg.open_wheel(path, lang)
+    if wheel is None:
+        log(f"  {lang}: {w['file']} is not a voice package of this format; file by file from the Hub")
+    return wheel
+
+
+def _put(lang: str, todo: list[File], home: Path, env: Mapping[str, str], log,
+         wheel: voicepkg.Wheel | None, marks: dict, done: dict) -> int:
+    fetched = 0
+    for f in todo:
+        target = home / f.dest
         tmp = home / f".{Path(f.dest).name}.{f.sha256[:12]}.download"
-        fetch(f, tmp, env, log)
+        fetch(f, tmp, env, log, pkg=wheel)
         fetched += f.size
         if f.unpack:
             _unpack(tmp, f.unpack, target)
@@ -214,9 +300,6 @@ def add(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log=print) ->
         done[f.dest] = f.sha256
         marks[lang] = done
         _save_marks(home, marks)
-    _hf_refs(home, files)
-    marks[lang] = done
-    _save_marks(home, marks)
     return fetched
 
 

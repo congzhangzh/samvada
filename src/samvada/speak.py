@@ -13,13 +13,33 @@ import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
-from . import engines, player
+from . import engines, packs, paths, player
 from .engines import Voice
 from .state import State
 
 
 def say(msg: str) -> None:
     print(f"samvada: {msg}", file=sys.stderr)
+
+
+def from_package(voice: Voice, env: Mapping[str, str]) -> Path | None:
+    """A language with no voice folder whose samvada-voice-<lang> package is installed (as
+    `pip install samvada` brings en and zh): install the pack from it, never the network.
+    The folder it is now in, or None."""
+    try:
+        lock = packs.load_lock()
+        pkg = packs.from_package(voice.lang, lock, env)
+        if pkg is None:
+            return None
+        home = paths.install_voices_dir(env)
+        packs.add(voice.lang, lock, home, env, log=lambda *a: None, offline=True)
+    except (packs.PackError, OSError) as e:
+        say(f"{voice.lang}: its voice package could not be installed: {e}")
+        return None
+    say(f"{voice.lang}: voice installed from {pkg.name} {pkg.version} into {home}")
+    if engines.engine_where(voice.engine, env) == "missing":
+        say(f"{voice.lang}: engine {voice.engine} is not installed: samvada voices add {voice.lang}")
+    return engines.voice_home(voice, [home])
 
 
 def speak(pairs: list[tuple[str, str]], *, state: State, voices: dict[str, Voice],
@@ -39,6 +59,8 @@ def speak(pairs: list[tuple[str, str]], *, state: State, voices: dict[str, Voice
                 skipped.append(f"{lang}({setting.where})")
                 continue
             home = engines.voice_home(voice, voices_dirs)
+            if home is None and mode != "always":
+                home = from_package(voice, env)
             if home is None and mode == "off":
                 skipped.append(f"{lang}(no voice pack)")
                 continue

@@ -146,6 +146,13 @@ def voices_md(langs: list[str]) -> str:
             src = (f"`{f['repo']}` @ `{f['revision'][:12]}`: `{f['path']}`" if f.get("repo")
                    else f"`{f['url']}`")
             lines.append(f"| {f['pack']} | `{f['dest']}` | {src} |")
+    voices = tomllib.loads((ROOT / "src/samvada/voices.toml").read_text(encoding="utf-8"))
+    lines += ["", "## Each voice's terms", ""]
+    for lang in langs:
+        v = voices.get(lang, {})
+        lines.append(f"- {lang}: {v.get('license', 'see its model card')}"
+                     + (f" ({v['license_url']})" if v.get("license_url") else "")
+                     + (f". Credit required: **{v['credit']}**" if v.get("credit") else ""))
     return "\n".join(lines) + "\n"
 
 

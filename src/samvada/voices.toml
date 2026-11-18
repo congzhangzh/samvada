@@ -3,6 +3,8 @@
 #   model    the model file, in the voices folder (`samvada status` shows which folder)
 #   online   the edge-tts voice, used only when the online mode allows it
 #   env      extra environment for the offline engine
+#   license  the voice's own terms, from its model card (Samvada's MIT license does not cover
+#            it); license_url where to read them; credit  a credit line the terms ask for
 # A language whose model file is missing has no voice pack: it is skipped (offline), or
 # spoken online when the online mode allows it.
 
@@ -10,11 +12,15 @@
 engine = "piper"
 model = "en_US-lessac-high.onnx"
 online = "en-US-AvaMultilingualNeural"
+license = "trained on the Lessac (Blizzard 2013) data, under its research licence"
+license_url = "https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html"
 
 [zh]
 engine = "piper"
 model = "zh_CN-xiao_ya-medium.onnx"
 online = "zh-CN-XiaoxiaoNeural"
+license = "trained on Databaker's BZNSYP corpus: non-commercial use"
+license_url = "https://www.data-baker.com/data/index/TNtts/"
 # Piper's Chinese phonemizer loads a BERT tokenizer through Hugging Face: keep it on the cache.
 env = { HF_HUB_OFFLINE = "1" }
 
@@ -22,8 +28,13 @@ env = { HF_HUB_OFFLINE = "1" }
 engine = "piper-plus"
 model = "tsukuyomi-chan-6lang-fp16.onnx"
 online = "ja-JP-NanamiNeural"
+license = "the terms of Piper Plus Tsukuyomi-chan and of the Tsukuyomi-chan corpus; a credit line is required"
+license_url = "https://tyc.rei-yumesaki.net/material/corpus/#terms3"
+credit = "■Piper Plus:つくよみちゃん"
 
 [fr]
 engine = "piper"
 model = "fr_FR-siwis-medium.onnx"
 online = "fr-FR-DeniseNeural"
+license = "the SIWIS French Speech Synthesis Database: CC-BY 4.0"
+license_url = "https://datashare.is.ed.ac.uk/handle/10283/2353"

@@ -177,3 +177,21 @@ def test_speak_alias_actually_speaks(env, claude, bindir):
     r = env.run("en", "hello", "zh", "你好", cmd=[str(bindir / "speak")])
     assert r.returncode == 0, r.stderr
     assert env.played() == ["en", "zh"]
+
+
+def test_setup_defaults_to_the_locale_and_english_when_unknown():
+    from samvada.agents import setup
+    assert setup.locale_lang({"LANG": "ja_JP.UTF-8"}) == "ja"
+    assert setup.locale_lang({"LC_ALL": "fr_CA.UTF-8", "LANG": "zh_CN.UTF-8"}) == "fr"
+    assert setup.locale_lang({"LC_MESSAGES": "zh_TW.UTF-8"}) == "zh"
+    assert setup.locale_lang({"LANG": "de_DE.UTF-8"}) == "en"
+    t = setup.default_tutor({"LANG": "zh_CN.UTF-8"})
+    assert (t.native, t.langs) == ("zh", ("en", "zh"))
+    t = setup.default_tutor({"LANG": "en_GB.UTF-8"})
+    assert (t.native, t.langs) == ("en", ("en",))
+
+
+def test_setup_with_no_settings_takes_the_locale(env, claude):
+    r = env.run("setup", "--dry-run", LANG="fr_FR.UTF-8", LC_ALL="", LC_MESSAGES="")
+    assert r.returncode == 0, r.stderr
+    assert "native fr, languages en,fr" in r.stdout

@@ -7,7 +7,7 @@ import sys
 
 from pathlib import Path
 
-from . import __version__, engines, packs, paths
+from . import __version__, engines, packs, paths, voicepkg
 from .presence import where
 from .speak import say, speak
 from .state import ONLINE_MODES, State, session_key
@@ -26,7 +26,8 @@ usage: samvada speak [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
        samvada presence [phone]        phone: the owner just wrote from the phone
        samvada voices [list]           the voice packs: installed where, size, engine
        samvada voices add <lang>... [--engine auto|always|never]
-                                       download, verify and install (network needed once)
+                                       verify and install, from its samvada-voice-<lang>
+                                       package when installed, else downloaded once
        samvada voices verify [<lang>...] | remove <lang>...
        samvada setup [--agent claude|codex] [--native zh] [--langs en,zh] [--ipa|--no-ipa]
                      [--speak-alias[=replace]|--no-speak-alias] [--dry-run] [--uninstall]
@@ -266,8 +267,15 @@ def _voices(rest: list[str], voices: dict) -> int:
         for lang, voice in voices.items():
             found = engines.voice_home(voice, dirs)
             where_ = f"installed in {found}" if found else "not installed"
+            pkg = voicepkg.find(lang)
+            boxed = ""
+            if pkg:
+                gaps = pkg.missing()
+                boxed = f"  package {pkg.name} {pkg.version}" + (
+                    f" (incomplete: {' '.join(gaps)} missing)" if gaps else
+                    "" if pkg.complete(lock.pack(lang)) else " (differs from voices.lock)")
             print(f"{lang}  {where_}  ({packs.sizes_line(lock, lang)})  "
-                  f"engine {voice.engine}: {engines.engine_where(voice.engine)}")
+                  f"engine {voice.engine}: {engines.engine_where(voice.engine)}{boxed}")
         print(f"install folder: {home}")
         return 0
     if sub == "add" and args:
