@@ -5,8 +5,17 @@ description: Speak to the owner with Samvada (the `samvada` command) and act as 
 
 # Samvada: the voice and the tutor
 
-The always-on rule (in CLAUDE.md or AGENTS.md, between `samvada:begin` and `samvada:end`)
-says what to do on every message. This skill is the how-to for everything else.
+The always-on rule says what to do on every message. This skill is the how-to for everything
+else. Where it lives, and where the owner's own lines go (Samvada never writes those):
+
+| Agent | Samvada's rule (rewritten by `samvada setup`) | The owner's own lines (they win) |
+|---|---|---|
+| Claude Code | `~/.claude/rules/samvada.md` | `~/.claude/rules/samvada.local.md` |
+| Codex | `AGENTS.md`, between `samvada:begin` and `samvada:end` | `AGENTS.md`, below `samvada:end` |
+| this skill | `SKILL.md` | `LOCAL.md` in this folder |
+
+When the owner wants a rule of their own about the tutor or the voice, it goes in their file,
+never in Samvada's: the next `samvada setup` rewrites Samvada's.
 
 ## Speaking
 
@@ -75,6 +84,8 @@ add <lang>` once; do not install on your own: it downloads tens to hundreds of M
 
 ## The table and its IPA row
 
+- Only when the rule asks for it (`samvada setup --table`, for a learner; the default rule
+  corrects the message and speaks the summary, with no table).
 - One row per language the rule lists, natural phrasing in each, not word-for-word.
 - The IPA row (when the rule asks for it) transcribes the whole English row, General American:
   slashes around it, stress marks (ˈ) on words of two or more syllables, the flap ɾ where
@@ -96,3 +107,5 @@ add <lang>` once; do not install on your own: it downloads tens to hundreds of M
   is off ("the voice is off: …"), so you do not compose speech nobody will hear.
 - At the end of a turn, if the voice is on and `samvada speak` was not called since the turn
   started, a hook asks you once to speak the closing. Speak it, then stop.
+
+If `LOCAL.md` is in this folder, read it; where it differs from this file, it wins.

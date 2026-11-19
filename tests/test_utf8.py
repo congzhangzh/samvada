@@ -1,5 +1,5 @@
 """UTF-8 everywhere: Samvada never relies on the locale's encoding (cp936/GBK on a Chinese
-Windows cannot hold the rule block's 🇺🇸, nor read a UTF-8 CLAUDE.md with Chinese in it).
+Windows cannot hold the rule block's 🇺🇸, nor read a UTF-8 CLAUDE.md with Chinese in it, which setup reads to move an old block out).
 
 Every child a test starts runs with -X warn_default_encoding and EncodingWarning as an error
 (tests/conftest.py); here: that holds, and setup in a real GBK locale writes UTF-8."""
@@ -45,17 +45,17 @@ def test_setup_writes_utf8_in_a_gbk_locale(env, claude):
     md = claude / "CLAUDE.md"
     md.write_bytes((md.read_text(encoding="utf-8") + OURS).encode("utf-8"))
     loc = {"LC_ALL": name, "LANG": name, "PYTHONUTF8": "0", "PYTHONIOENCODING": ""}
-    r = env.run("setup", "--native", "zh", "--langs", "en,zh,ja,fr", **loc)
+    r = env.run("setup", "--native", "zh", "--langs", "en,zh,ja,fr", "--table", **loc)
     assert r.returncode == 0, f"{name} ({enc}): {r.stderr}"
-    raw = md.read_bytes()
-    text = raw.decode("utf-8")  # strict: every byte is UTF-8
+    raw = (claude / "rules/samvada.md").read_bytes()
+    raw.decode("utf-8")  # strict: every byte is UTF-8
     assert "🇺🇸 EN".encode("utf-8") in raw and "🔤 IPA".encode("utf-8") in raw
-    assert OURS in text  # the owner's own Chinese, read and written back unchanged
+    assert OURS in md.read_bytes().decode("utf-8")  # the owner's own Chinese, read, never rewritten
     skill = (claude / "skills/samvada/SKILL.md").read_bytes().decode("utf-8")
     assert skill.startswith("---\nname: samvada")
     r = env.run("setup", **loc)  # read back in the same locale: nothing to change
     assert r.returncode == 0 and "nothing to change" in r.stdout, r.stderr
-    assert md.read_bytes() == raw
+    assert (claude / "rules/samvada.md").read_bytes() == raw
 
 
 def test_a_pipe_gets_utf8_whatever_the_locale(env, claude):

@@ -6,8 +6,7 @@ send, before any other work:
 1. **Correct it.** Correct the grammar and wording of every language in the message and list
    the corrections, with the IPA of a word whose sound or spelling was wrong. This is the
    first text of the turn, printed before any tool call or work.
-2. **Show it in every language.** A table with one row per language: {rows}.{ipa}
-3. **Speak with `samvada speak`**, one call, every language passed in this order: the
+{table}{n_speak}. **Speak with `samvada speak`**, one call, every language passed in this order: the
    message's own language first, then {order}.
    - A question answered at once: one call at the end; each language says the corrected
      question, then the answer.
@@ -17,7 +16,7 @@ send, before any other work:
    - Spoken text carries no symbols, code, paths or formulas.
    - When `samvada` stays silent it says why and exits 0: never retry, never play sound
      another way.
-4. **A message that arrives while you work** gets the same: its corrections and table are
+{n_mid}. **A message that arrives while you work** gets the same: its corrections{and_table} are
    the next text you print, a short opening call ("you also want …; I will …"), and it is
    folded into the closing.
 

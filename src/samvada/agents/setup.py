@@ -1,10 +1,14 @@
 """`samvada setup`: give an agent the tutor's rule, the skill and the hooks (DESIGN 7.4).
 
 Prints the plan first (`--dry-run` stops there), then changes only what differs:
-  1. rule   the managed block between `samvada:begin` and `samvada:end` in CLAUDE.md
-            (Claude Code) or AGENTS.md (Codex), filled from the owner's settings
+  1. rule   filled from the owner's settings. Claude Code: its own file, rules/samvada.md
+            (Claude Code reads every rules/*.md at the start of a session); a block an older
+            setup left in CLAUDE.md is moved out. Codex has no rules folder: the managed block
+            between `samvada:begin` and `samvada:end` in AGENTS.md.
+            The owner's own lines live beside it and win where they differ: rules/samvada.local.md
+            (Claude Code), below `samvada:end` (Codex). Samvada never writes or removes them.
   2. skill  skills/samvada/SKILL.md, copied (marked as Samvada's; a folder that is not ours
-            is never touched)
+            is never touched). The owner's LOCAL.md beside it is theirs: kept on --uninstall.
   3. hooks  Claude Code only: UserPromptSubmit and Stop in settings.json; other hooks kept
   4. voices whether each language of the rule has its voice pack (nothing is downloaded)
   5. alias  with --speak-alias: a `speak` command beside `samvada` (a two-line program, not a
@@ -39,6 +43,11 @@ FLAGS = {"en": "🇺🇸 EN", "zh": "🇨🇳 ZH", "ja": "🇯🇵 JA", "fr": "�
 BEGIN = "<!-- samvada:begin (managed by `samvada setup`; change the settings, not this block) -->"
 END = "<!-- samvada:end -->"
 BLOCK_RE = re.compile(r"\n*<!-- samvada:begin.*?<!-- samvada:end -->\n?", re.S)
+RULES_MARK = "<!-- written by `samvada setup`"
+RULES_HEADER = (f"{RULES_MARK} from the owner's settings; change the settings and run it again, "
+                "never this file. The owner's own lines go in samvada.local.md beside it. -->")
+LOCAL_RULE = "samvada.local.md"
+LOCAL_SKILL = "LOCAL.md"
 MARKER = ".samvada-managed"
 HOOK_TAG = "-m samvada hook"
 ALIAS_TAG = "managed by `samvada setup --speak-alias`"
@@ -50,6 +59,7 @@ class Tutor:
     langs: tuple[str, ...] = ("en",)
     ipa: bool = True
     speak_alias: bool = False
+    table: bool = False  # the table of the message in every language (and its IPA row): opt-in
 
 
 def locale_lang(env: Mapping[str, str] = os.environ) -> str:
@@ -85,8 +95,9 @@ def load_tutor(env: Mapping[str, str] = os.environ) -> Tutor:
         d = tomllib.loads(config_path(env).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return t
+    # a tutor.toml from before the table was opt-in (2026-11-19) had the table: an upgrade keeps it
     return Tutor(d.get("native", t.native), tuple(d.get("langs", t.langs)), bool(d.get("ipa", True)),
-                 bool(d.get("speak_alias", False)))
+                 bool(d.get("speak_alias", False)), bool(d.get("table", True)))
 
 
 def save_tutor(t: Tutor, env: Mapping[str, str] = os.environ) -> None:
@@ -95,10 +106,11 @@ def save_tutor(t: Tutor, env: Mapping[str, str] = os.environ) -> None:
     langs = ", ".join(f'"{l}"' for l in t.langs)
     p.write_text(f'# Written by `samvada setup`; run it again after a change.\nnative = "{t.native}"\n'
                  f"langs = [{langs}]\nipa = {'true' if t.ipa else 'false'}\n"
-                 f"speak_alias = {'true' if t.speak_alias else 'false'}\n", encoding="utf-8")
+                 f"speak_alias = {'true' if t.speak_alias else 'false'}\n"
+                 f"table = {'true' if t.table else 'false'}\n", encoding="utf-8")
 
 
-def render_rule(t: Tutor) -> str:
+def _rule_body(t: Tutor) -> str:
     learning = [NAMES[l] for l in t.langs if l != t.native] or [NAMES[l] for l in t.langs]
     rows = []
     for l in t.langs:
@@ -107,10 +119,27 @@ def render_rule(t: Tutor) -> str:
             rows.append("🔤 IPA")
     ipa = (" The IPA row transcribes the whole English row (General American): slashes, stress "
            "marks, the flap ɾ, weak forms as spoken.") if t.ipa and "en" in t.langs else ""
+    table = (f"2. **Show it in every language.** A table with one row per language: "
+             f"{', '.join(rows)}.{ipa}\n") if t.table else ""
     body = resources.files("samvada").joinpath("agents", "rule.md").read_text(encoding="utf-8").format(
-        native=NAMES[t.native], learning=", ".join(learning), rows=", ".join(rows), ipa=ipa,
+        native=NAMES[t.native], learning=", ".join(learning), table=table,
+        n_speak=3 if t.table else 2, n_mid=4 if t.table else 3, and_table=" and table" if t.table else "",
         order=", ".join(NAMES[l] for l in t.langs) + " (each language once)")
-    return f"{BEGIN}\n{body.rstrip()}\n{END}\n"
+    return body.rstrip()
+
+
+def render_rule(t: Tutor) -> str:
+    """The block for AGENTS.md (Codex): the owner's own lines go below it."""
+    return (f"{BEGIN}\n{_rule_body(t)}\n\nThe owner's own lines go below `samvada:end`, outside "
+            f"this block (Samvada never writes there); where they differ from it, they win.\n{END}\n")
+
+
+def render_rules_file(t: Tutor) -> str:
+    """rules/samvada.md (Claude Code): the whole file is Samvada's; the owner's lines live in
+    samvada.local.md beside it. Claude Code reads both and nothing merges them, so the last
+    line says which one wins."""
+    return (f"{RULES_HEADER}\n\n{_rule_body(t)}\n\n`{LOCAL_RULE}` beside this file is the owner's "
+            "own (Samvada never writes it); where the two differ, it wins.\n")
 
 
 def agent_dir(agent: str, env: Mapping[str, str] = os.environ) -> Path:
@@ -203,36 +232,92 @@ class Step:
         self.name, self.desc, self.apply = name, desc, apply
 
 
+def _block_steps(rule_file: Path, t: Tutor, uninstall: bool, *, migrate: bool = False) -> list[Step]:
+    """The managed block in an instruction file the owner also writes (AGENTS.md); with
+    migrate, only take out a block an older setup left there (CLAUDE.md)."""
+    old = rule_file.read_text(encoding="utf-8") if rule_file.exists() else ""
+    has = BLOCK_RE.search(old) is not None
+    stripped = BLOCK_RE.sub("\n", old).rstrip("\n")
+    if uninstall or migrate:
+        if not has:
+            return [] if migrate else [Step("rule", f"no Samvada block in {rule_file}")]
+        new = stripped + "\n"
+        verb, why = ("remove the block from", "") if uninstall else \
+            ("move the old block out of", " (the rule has its own file now)")
+    else:
+        new = (stripped + "\n\n" if stripped else "") + render_rule(t)
+        if new == old:
+            return [Step("rule", f"unchanged in {rule_file}")]
+        verb, why = ("update the block in" if has else "add the block to"), ""
+
+    def write_rule(new=new):
+        rule_file.parent.mkdir(parents=True, exist_ok=True)
+        _backup(rule_file)
+        rule_file.write_text(new, encoding="utf-8")
+    return [Step("rule", f"{verb} {rule_file}{why}", write_rule)]
+
+
+def _rules_file_steps(home: Path, t: Tutor, uninstall: bool) -> list[Step]:
+    """Claude Code: rules/samvada.md is Samvada's whole file; rules/samvada.local.md is the
+    owner's and is never written or removed."""
+    rules = home / "rules"
+    f, local = rules / "samvada.md", rules / LOCAL_RULE
+    cur = f.read_text(encoding="utf-8") if f.exists() else None
+    steps: list[Step] = []
+    if cur is not None and not cur.startswith(RULES_MARK):
+        steps.append(Step("rule", f"{f} exists and is not Samvada's: left alone"))
+    elif uninstall:
+        steps.append(Step("rule", f"remove {f}", f.unlink) if cur is not None
+                     else Step("rule", f"no Samvada rules file in {rules}"))
+    else:
+        want = render_rules_file(t)
+        if cur == want:
+            steps.append(Step("rule", f"unchanged in {f}"))
+        else:
+            def write_file(want=want):
+                rules.mkdir(parents=True, exist_ok=True)
+                f.write_text(want, encoding="utf-8")
+            steps.append(Step("rule", f"{'update' if cur is not None else 'write'} {f}", write_file))
+    steps += _block_steps(home / "CLAUDE.md", t, uninstall, migrate=True)
+    if local.exists():
+        steps.append(Step("rule", f"{local} is yours: " +
+                          ("left in place" if uninstall else "kept as it is, and it wins")))
+    return steps
+
+
 def plan(agent: str, t: Tutor, uninstall: bool, env: Mapping[str, str] = os.environ,
          replace: bool = False) -> list[Step]:
     home = agent_dir(agent, env)
     steps: list[Step] = []
 
     # 1. rule
-    rule_file = home / ("CLAUDE.md" if agent == "claude" else "AGENTS.md")
-    old = rule_file.read_text(encoding="utf-8") if rule_file.exists() else ""
-    stripped = BLOCK_RE.sub("\n", old).rstrip("\n")
-    new = (stripped + "\n") if uninstall else ((stripped + "\n\n" if stripped else "") + render_rule(t))
-    if uninstall and new.strip() == stripped.strip() and BLOCK_RE.search(old) is None:
-        steps.append(Step("rule", f"no Samvada block in {rule_file}"))
-    elif new == old:
-        steps.append(Step("rule", f"unchanged in {rule_file}"))
+    if agent == "claude":
+        steps += _rules_file_steps(home, t, uninstall)
     else:
-        def write_rule(new=new):
-            rule_file.parent.mkdir(parents=True, exist_ok=True)
-            _backup(rule_file)
-            rule_file.write_text(new, encoding="utf-8")
-        verb = "remove the block from" if uninstall else ("update the block in" if BLOCK_RE.search(old) else "add the block to")
-        steps.append(Step("rule", f"{verb} {rule_file}", write_rule))
+        steps += _block_steps(home / "AGENTS.md", t, uninstall)
+        if not uninstall and (home / "AGENTS.override.md").exists():
+            # Codex reads the first of AGENTS.override.md, AGENTS.md: the override replaces
+            # AGENTS.md, it is not added to it (unlike Claude Code's .local files)
+            steps.append(Step("rule", f"warning: Codex reads {home / 'AGENTS.override.md'} instead of "
+                              "AGENTS.md, so it will not see this block; copy the block there, "
+                              "or move your lines below `samvada:end` in AGENTS.md"))
 
     # 2. skill
     dest = home / "skills" / "samvada"
     src = resources.files("samvada").joinpath("agents", "skills", "samvada", "SKILL.md").read_text(encoding="utf-8")
     ours = (dest / MARKER).exists()
-    if dest.exists() and not ours:
+    mine = dest / LOCAL_SKILL  # the owner's, beside ours: never written, never removed
+    foreign = dest.exists() and not ours and any(p.name != LOCAL_SKILL for p in dest.iterdir())
+    if foreign:
         steps.append(Step("skill", f"{dest} exists and is not Samvada's: left alone"))
     elif uninstall:
-        if ours:
+        if ours and mine.exists():
+            def remove_ours():
+                for name in ("SKILL.md", MARKER):
+                    (dest / name).unlink(missing_ok=True)
+            steps.append(Step("skill", f"remove {dest / 'SKILL.md'}; {mine} is yours: left in place",
+                              remove_ours))
+        elif ours:
             steps.append(Step("skill", f"remove {dest}", lambda: shutil.rmtree(dest)))
         else:
             steps.append(Step("skill", f"not installed in {dest}"))
@@ -322,6 +407,8 @@ def main(args: list[str], env: Mapping[str, str] = os.environ) -> int:
             t.langs = tuple(l for l in next(it, "").split(",") if l)
         elif a in ("--ipa", "--no-ipa"):
             t.ipa = a == "--ipa"
+        elif a in ("--table", "--no-table"):
+            t.table = a == "--table"
         elif a in ("--speak-alias", "--speak-alias=replace", "--no-speak-alias"):
             t.speak_alias = a != "--no-speak-alias"
             replace = a == "--speak-alias=replace"
@@ -337,7 +424,8 @@ def main(args: list[str], env: Mapping[str, str] = os.environ) -> int:
         return 2
     steps = plan(agent, t, uninstall, env, replace)
     print(f"samvada setup ({agent}{', uninstall' if uninstall else ''}): native {t.native}, "
-          f"languages {','.join(t.langs)}, IPA {'on' if t.ipa else 'off'}")
+          f"languages {','.join(t.langs)}, table {'on' if t.table else 'off'}"
+          f"{(', IPA ' + ('on' if t.ipa else 'off')) if t.table else ''}")
     for s in steps:
         print(f"  {s.name:7} {s.desc}")
     if dry:

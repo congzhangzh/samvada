@@ -51,6 +51,10 @@ samvada online fallback             # allow edge-tts for a language that fails o
                                     #   (needs: pip install 'samvada[online]')
 samvada presence phone              # a chat bridge says: the owner just wrote from the phone
 samvada voices verify               # check the installed voices against their checksums
+samvada setup                       # give Claude Code (or Codex: --agent codex) the rule: correct
+                                    #   each message, speak a short summary; your own lines go in
+                                    #   ~/.claude/rules/samvada.local.md, which setup never touches
+samvada setup --table --ipa         # for a learner: also each message in every language, IPA row
 samvada setup --speak-alias         # also answer to `speak en "Hello"` (opt-in: the name is
                                     #   espeak's on some systems; another `speak` is left alone)
 ```
