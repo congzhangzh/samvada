@@ -680,7 +680,7 @@ wheels = [
 
 [[package]]
 name = "samvada"
-version = "20261119.3"
+version = "20261119.4"
 source = { editable = "." }
 
 [package.optional-dependencies]

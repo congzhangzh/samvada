@@ -20,5 +20,5 @@ send, before any other work:
    the next text you print, a short opening call ("you also want …; I will …"), and it is
    folded into the closing.
 
-Read the `samvada` skill for anything else: mute, scopes, languages, the online mode, a
+{call}Read the `samvada` skill for anything else: mute, scopes, languages, the online mode, a
 chat-bridge session, failures.

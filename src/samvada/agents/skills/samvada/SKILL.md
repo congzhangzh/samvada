@@ -46,6 +46,7 @@ samvada speak en "<text>" zh "<text>" ja "<text>" fr "<text>"   # every language
 | "which languages are on?", "list the languages" | `samvada lang --list` (`-l`): every language, on or off, where that was set, its voice pack |
 | "online mode", "use edge tts" | `samvada online always`; "safe mode", "offline mode" → `samvada online off` |
 | "allow online when a voice fails" | `samvada online fallback` |
+| "call me Alex", "don't call me anything" | `samvada setup --call "Alex"`; `samvada setup --no-call` (it keeps the other settings). A name in their own rules wins over it |
 
 The older form `samvada lang on|off <lang>... | reset` still works (scripts and other sessions
 use it); write the flags. Options combine: `lang -s --reset --disable-fr --list` drops this

@@ -3,4 +3,4 @@
 The agent decides what to say; Samvada decides whether, where and how it is heard.
 """
 
-__version__ = "20261119.3"
+__version__ = "20261119.4"

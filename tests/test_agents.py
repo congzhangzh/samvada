@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -283,3 +284,58 @@ def test_setup_with_no_settings_takes_the_locale(env, claude):
     r = env.run("setup", "--dry-run", LANG="fr_FR.UTF-8", LC_ALL="", LC_MESSAGES="")
     assert r.returncode == 0, r.stderr
     assert "native fr, languages en,fr" in r.stdout
+
+
+def _setup_in_process(tmp_path, monkeypatch, args, ask):
+    """setup.main in this process, its home a test folder: the rules, skill and hooks paths come
+    from Path.home(), so HOME itself must move (a dict passed as env is not enough)."""
+    from samvada.agents import setup
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    for k, v in {"HOME": str(home), "XDG_CONFIG_HOME": str(tmp_path / "config"),
+                 "XDG_DATA_HOME": str(tmp_path / "data"), "SAMVADA_BIN_DIR": str(tmp_path / "bin"),
+                 "LANG": "en_US.UTF-8"}.items():
+        monkeypatch.setenv(k, v)
+    assert Path.home() == home
+    rc = setup.main(args, dict(os.environ), ask=ask)
+    rule = home / ".claude" / "rules" / "samvada.md"
+    toml = tmp_path / "config" / "samvada" / "tutor.toml"
+    return (rc, rule.read_text(encoding="utf-8") if rule.exists() else "",
+            toml.read_text(encoding="utf-8") if toml.exists() else "")
+
+
+def test_setup_asks_the_name_once_and_the_rule_uses_it(tmp_path, monkeypatch):
+    """Idea C: the first setup at a terminal asks; the answer is kept, never asked again."""
+    asked = []
+    rc, md, toml = _setup_in_process(tmp_path, monkeypatch, [], lambda: asked.append(1) or "Alex Lee")
+    assert rc == 0 and asked == [1]
+    assert "address the owner as **Alex Lee**" in md and "unless their own rules say otherwise" in md
+    assert 'call = "Alex Lee"' in toml
+    rc, md, _ = _setup_in_process(tmp_path, monkeypatch, ["--table"], lambda: asked.append(2) or "Other")
+    assert rc == 0 and asked == [1] and "**Alex Lee**" in md
+
+
+def test_no_name_means_you_and_their_own_rules_win(tmp_path, monkeypatch):
+    """Idea B: Enter (or no terminal) gives no name: "you", never a title the agent picks."""
+    rc, md, toml = _setup_in_process(tmp_path, monkeypatch, [], lambda: "")
+    assert rc == 0 and 'call = ""' in toml
+    assert 'when their own rules give none, address the owner as "you"' in md
+    assert "master" not in md.lower()
+    rc, md, toml = _setup_in_process(tmp_path, monkeypatch, ["--call", "聪"], lambda: "never asked")
+    assert 'call = "聪"' in toml and "**聪**" in md
+    rc, md, toml = _setup_in_process(tmp_path, monkeypatch, ["--no-call"], lambda: "never asked")
+    assert 'call = ""' in toml and '"you"' in md
+
+
+def test_no_terminal_asks_at_the_next_setup(tmp_path, monkeypatch):
+    rc, md, toml = _setup_in_process(tmp_path, monkeypatch, [], lambda: None)
+    assert rc == 0 and "call" not in toml and '"you"' in md
+    rc, md, toml = _setup_in_process(tmp_path, monkeypatch, [], lambda: "Alex")
+    assert 'call = "Alex"' in toml and "**Alex**" in md
+
+
+def test_a_dry_run_never_asks(tmp_path, monkeypatch):
+    def boom():
+        raise AssertionError("asked")
+    rc, md, toml = _setup_in_process(tmp_path, monkeypatch, ["--dry-run"], boom)
+    assert rc == 0 and md == "" and toml == ""

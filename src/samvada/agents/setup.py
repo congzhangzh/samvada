@@ -60,6 +60,7 @@ class Tutor:
     ipa: bool = True
     speak_alias: bool = False
     table: bool = False  # the table of the message in every language (and its IPA row): opt-in
+    call: str | None = None  # the owner's name for the agent: None = never asked, "" = none
 
 
 def locale_lang(env: Mapping[str, str] = os.environ) -> str:
@@ -97,7 +98,8 @@ def load_tutor(env: Mapping[str, str] = os.environ) -> Tutor:
         return t
     # a tutor.toml from before the table was opt-in (2026-11-19) had the table: an upgrade keeps it
     return Tutor(d.get("native", t.native), tuple(d.get("langs", t.langs)), bool(d.get("ipa", True)),
-                 bool(d.get("speak_alias", False)), bool(d.get("table", True)))
+                 bool(d.get("speak_alias", False)), bool(d.get("table", True)),
+                 str(d["call"]) if "call" in d else None)
 
 
 def save_tutor(t: Tutor, env: Mapping[str, str] = os.environ) -> None:
@@ -107,7 +109,18 @@ def save_tutor(t: Tutor, env: Mapping[str, str] = os.environ) -> None:
     p.write_text(f'# Written by `samvada setup`; run it again after a change.\nnative = "{t.native}"\n'
                  f"langs = [{langs}]\nipa = {'true' if t.ipa else 'false'}\n"
                  f"speak_alias = {'true' if t.speak_alias else 'false'}\n"
-                 f"table = {'true' if t.table else 'false'}\n", encoding="utf-8")
+                 f"table = {'true' if t.table else 'false'}\n"
+                 + ("" if t.call is None else f"call = {json.dumps(t.call, ensure_ascii=False)}\n"),
+                 encoding="utf-8")
+
+
+def _call_line(t: Tutor) -> str:
+    """What to call the owner. Their own rules (samvada.local.md, CLAUDE.md, AGENTS.md…) win."""
+    if t.call:
+        return (f"**Their name:** address the owner as **{t.call}**, on screen and in the voice, "
+                "unless their own rules say otherwise (then theirs).\n\n")
+    return ("**Their name:** when their own rules give none, address the owner as \"you\", with no "
+            "name or title of your own (`samvada setup --call <name>` sets one).\n\n")
 
 
 def _rule_body(t: Tutor) -> str:
@@ -124,7 +137,7 @@ def _rule_body(t: Tutor) -> str:
     body = resources.files("samvada").joinpath("agents", "rule.md").read_text(encoding="utf-8").format(
         native=NAMES[t.native], learning=", ".join(learning), table=table,
         n_speak=3 if t.table else 2, n_mid=4 if t.table else 3, and_table=" and table" if t.table else "",
-        order=", ".join(NAMES[l] for l in t.langs) + " (each language once)")
+        order=", ".join(NAMES[l] for l in t.langs) + " (each language once)", call=_call_line(t))
     return body.rstrip()
 
 
@@ -390,7 +403,17 @@ def plan(agent: str, t: Tutor, uninstall: bool, env: Mapping[str, str] = os.envi
     return steps
 
 
-def main(args: list[str], env: Mapping[str, str] = os.environ) -> int:
+def _ask_call() -> str | None:
+    """Ask once, at a terminal, what the agent should call the owner (Enter: no name)."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None  # asked at the next setup run at a terminal
+    try:
+        return input("What should the agent call you? A name, or Enter for none: ").strip()
+    except EOFError:
+        return None
+
+
+def main(args: list[str], env: Mapping[str, str] = os.environ, ask=_ask_call) -> int:
     agent, dry, uninstall, replace = "claude", False, False, False
     t = load_tutor(env)
     it = iter(args)
@@ -409,6 +432,10 @@ def main(args: list[str], env: Mapping[str, str] = os.environ) -> int:
             t.ipa = a == "--ipa"
         elif a in ("--table", "--no-table"):
             t.table = a == "--table"
+        elif a == "--call":
+            t.call = next(it, "").strip()
+        elif a == "--no-call":
+            t.call = ""
         elif a in ("--speak-alias", "--speak-alias=replace", "--no-speak-alias"):
             t.speak_alias = a != "--no-speak-alias"
             replace = a == "--speak-alias=replace"
@@ -422,10 +449,17 @@ def main(args: list[str], env: Mapping[str, str] = os.environ) -> int:
     if bad or not t.langs:
         print(f"samvada setup: languages are {' '.join(NAMES)} (got {' '.join(bad) or 'none'})", file=sys.stderr)
         return 2
+    if t.call is None and not dry and not uninstall:
+        try:
+            t.call = ask()
+        except KeyboardInterrupt:
+            print("\nsamvada setup: stopped, nothing changed", file=sys.stderr)
+            return 130
     steps = plan(agent, t, uninstall, env, replace)
     print(f"samvada setup ({agent}{', uninstall' if uninstall else ''}): native {t.native}, "
           f"languages {','.join(t.langs)}, table {'on' if t.table else 'off'}"
-          f"{(', IPA ' + ('on' if t.ipa else 'off')) if t.table else ''}")
+          f"{(', IPA ' + ('on' if t.ipa else 'off')) if t.table else ''}"
+          f", name {t.call or 'none'}")
     for s in steps:
         print(f"  {s.name:7} {s.desc}")
     if dry:

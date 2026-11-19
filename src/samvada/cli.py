@@ -45,12 +45,13 @@ usage: samvada speak [--wait] [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
        samvada doctor                  check every voice, engine, config file and player
        samvada setup [--agent claude|codex] [--native zh] [--langs en,zh] [--table|--no-table]
                      [--ipa|--no-ipa] [--speak-alias[=replace]|--no-speak-alias] [--dry-run]
-                     [--uninstall]
+                     [--call <name>|--no-call] [--uninstall]
                                        the tutor's rule, the skill and the hooks for an agent:
                                        correct each message, speak the summary; --table also
                                        shows each message in every language (--ipa: with an
                                        IPA row under English); --speak-alias adds a `speak`
-                                       command for samvada speak
+                                       command for samvada speak; --call: what the agent
+                                       calls you (asked once at a terminal; none: "you")
        samvada [--session] profile [use <name> | reset | list]
                                        voice profiles: balanced (the package's defaults, what a
                                        release ships) and yours (any name, in

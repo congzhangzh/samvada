@@ -54,6 +54,8 @@ samvada voices verify               # check the installed voices against their c
 samvada setup                       # give Claude Code (or Codex: --agent codex) the rule: correct
                                     #   each message, speak a short summary; your own lines go in
                                     #   ~/.claude/rules/samvada.local.md, which setup never touches
+samvada setup --call "Alex"         # what the agent calls you (setup asks once; none: "you");
+                                    #   a name in your own rules wins over it
 samvada setup --table --ipa         # for a learner: also each message in every language, IPA row
 samvada setup --speak-alias         # also answer to `speak en "Hello"` (opt-in: the name is
                                     #   espeak's on some systems; another `speak` is left alone)
