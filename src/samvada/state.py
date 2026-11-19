@@ -35,13 +35,13 @@ def session_key(env: Mapping[str, str] = os.environ) -> str | None:
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text)
+    tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
 
 
 def _read(path: Path, limit: int = 200) -> str | None:
     try:
-        return path.read_text()[:limit]
+        return path.read_text(encoding="utf-8")[:limit]
     except OSError:
         return None
 
@@ -196,5 +196,5 @@ def migrate(legacy: Path, root: Path) -> bool:
                 if (s / rel).is_file():
                     (root / "sessions" / s.name).mkdir(parents=True, exist_ok=True)
                     shutil.copy2(s / rel, root / "sessions" / s.name / rel)
-    (root / "MIGRATED").write_text(f"copied from {legacy}\n")
+    (root / "MIGRATED").write_text(f"copied from {legacy}\n", encoding="utf-8")
     return True

@@ -46,7 +46,7 @@ def checkout(repo: str, commit: str, where: Path) -> Path:
         where.parent.mkdir(parents=True, exist_ok=True)
         bundle.run(["git", "clone", "--filter=blob:none", "--no-checkout", repo, where])
     bundle.run(["git", "-C", where, "checkout", "--quiet", "--force", commit])
-    head = bundle.run(["git", "-C", where, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    head = bundle.run(["git", "-C", where, "rev-parse", "HEAD"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
     if head != commit:
         sys.exit(f"build_wheels: {where} is at {head}, not {commit}")
     return where

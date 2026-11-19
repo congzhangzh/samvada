@@ -72,14 +72,14 @@ def load_lock(path: Path | None = None) -> Lock:
     """voices.lock from the package; $SAMVADA_VOICE_LOCK may point at another (tests)."""
     if path is None and os.environ.get("SAMVADA_VOICE_LOCK"):
         path = Path(os.environ["SAMVADA_VOICE_LOCK"])
-    text = path.read_text() if path else \
-        resources.files("samvada").joinpath("voices.lock").read_text()
+    text = path.read_text(encoding="utf-8") if path else \
+        resources.files("samvada").joinpath("voices.lock").read_text(encoding="utf-8")
     data = tomllib.loads(text)
     return Lock([File(**f) for f in data.get("file", [])], dict(data.get("engines", {})))
 
 
 def engine_requirements(engine: str) -> str:
-    return resources.files("samvada").joinpath("locks", f"{engine}.txt").read_text()
+    return resources.files("samvada").joinpath("locks", f"{engine}.txt").read_text(encoding="utf-8")
 
 
 class PackError(Exception):
@@ -170,14 +170,14 @@ def fetch(f: File, out: Path, env: Mapping[str, str], log=print,
 # -- install -------------------------------------------------------------------------------
 def _marks(home: Path) -> dict[str, dict[str, str]]:
     try:
-        return json.loads((home / MARK).read_text())
+        return json.loads((home / MARK).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
 def _save_marks(home: Path, marks: dict) -> None:
     tmp = home / (MARK + ".tmp")
-    tmp.write_text(json.dumps(marks, indent=1, sort_keys=True) + "\n")
+    tmp.write_text(json.dumps(marks, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(home / MARK)
 
 
@@ -211,7 +211,7 @@ def _hf_refs(home: Path, files: list[File]) -> None:
         if len(parts) > 4 and parts[0] == "hf" and parts[3] == "snapshots":
             ref = home.joinpath(*parts[:3], "refs", "main")
             ref.parent.mkdir(parents=True, exist_ok=True)
-            ref.write_text(parts[4])
+            ref.write_text(parts[4], encoding="utf-8")
 
 
 def from_package(lang: str, lock: Lock, env: Mapping[str, str]) -> voicepkg.Package | None:
@@ -357,7 +357,7 @@ def engine_lines(engine: str, again: str) -> list[str]:
     """How to install a missing engine: its pinned requirements, from PyPI."""
     reqs = resources.files("samvada").joinpath("locks", f"{engine}.txt")
     try:
-        pins = [l for l in reqs.read_text().splitlines() if l and not l[0].isspace() and l[0] != "#"]
+        pins = [l for l in reqs.read_text(encoding="utf-8").splitlines() if l and not l[0].isspace() and l[0] != "#"]
     except OSError:
         pins = []
     return [f"engine {engine}: not installed; it comes from PyPI, {len(pins)} pinned packages "
@@ -495,7 +495,7 @@ def engine_ok(d: Path) -> bool:
     tag = f"{sys.version_info.major}.{sys.version_info.minor}"
     try:
         package = {"kokoro": "kokoro_onnx", "voicevox": "voicevox_core"}.get(d.name, "piper")
-        return (d / ".python").read_text().strip() == tag and (d / package).is_dir()
+        return (d / ".python").read_text(encoding="utf-8").strip() == tag and (d / package).is_dir()
     except OSError:
         return False
 
@@ -509,7 +509,7 @@ def install_engine(engine: str, root: Path, log=print) -> Path:
         return d
     reqs = root / f".{engine}.txt"
     root.mkdir(parents=True, exist_ok=True)
-    reqs.write_text(engine_requirements(engine))
+    reqs.write_text(engine_requirements(engine), encoding="utf-8")
     staging = root / f".{engine}.staging"
     shutil.rmtree(staging, ignore_errors=True)
     uv = shutil.which("uv")
@@ -522,12 +522,12 @@ def install_engine(engine: str, root: Path, log=print) -> Path:
         cmd = [sys.executable, "-m", "pip", "install", "--quiet", "--target", str(staging),
                "--no-deps", "-r", str(reqs)]
     log(f"  engine {engine}: installing its pinned requirements ({'uv' if uv else 'pip'})")
-    r = subprocess.run(cmd)
+    r = subprocess.run(cmd, env={**os.environ, "PYTHONUTF8": "1"})  # pip is a Python child
     reqs.unlink(missing_ok=True)
     if r.returncode != 0:
         shutil.rmtree(staging, ignore_errors=True)
         raise PackError(f"engine {engine}: install failed (needs uv, or pip in this Python)")
-    (staging / ".python").write_text(f"{sys.version_info.major}.{sys.version_info.minor}\n")
+    (staging / ".python").write_text(f"{sys.version_info.major}.{sys.version_info.minor}\n", encoding="utf-8")
     shutil.rmtree(d, ignore_errors=True)
     staging.replace(d)
     return d

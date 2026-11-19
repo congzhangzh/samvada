@@ -100,8 +100,13 @@ one; read them on the model cards before you use or redistribute a voice.
 
 ```bash
 uv run pytest -q                     # fake engines, player, desktop and Hub: no audio, no network
+uv run python -X warn_default_encoding -m pytest -q   # the tests' own process held to UTF-8 too
 uv run python release/bundle.py <version> --test   # the standalone bundle and its offline test
 ```
+
+Text is UTF-8 everywhere, whatever the locale (a Chinese Windows is cp936): every text file and
+text subprocess names `encoding="utf-8"`, and every Python child gets `PYTHONUTF8=1`. Each child
+a test starts treats an `EncodingWarning` as an error.
 
 ## License
 

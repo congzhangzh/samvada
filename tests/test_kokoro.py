@@ -18,7 +18,7 @@ class Kokoro:
         self.model, self.cfg = os.path.basename(model), vocab_config
     def create(self, text, voice, speed=1.0, lang="en-us", is_phonemes=False):
         import array
-        with open(os.environ["FAKE_LOG"], "a") as f:
+        with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as f:
             f.write(f"kokoro {self.model} {voice} {'ph' if is_phonemes else lang} "
                     f"cfg={'yes' if self.cfg else 'no'} {text}\\n")
         class A(list):
@@ -42,22 +42,22 @@ class JAG2P:
 def engine(env) -> None:
     d = Path(env.vars["XDG_DATA_HOME"]) / "samvada" / "engines" / "kokoro"
     (d / "kokoro_onnx").mkdir(parents=True)
-    (d / "kokoro_onnx" / "__init__.py").write_text(FAKE_KOKORO)
+    (d / "kokoro_onnx" / "__init__.py").write_text(FAKE_KOKORO, encoding="utf-8")
     (d / "misaki").mkdir()
-    (d / "misaki" / "__init__.py").write_text("")
-    (d / "misaki" / "zh.py").write_text(FAKE_MISAKI_ZH)
-    (d / "misaki" / "ja.py").write_text(FAKE_MISAKI_JA)
+    (d / "misaki" / "__init__.py").write_text("", encoding="utf-8")
+    (d / "misaki" / "zh.py").write_text(FAKE_MISAKI_ZH, encoding="utf-8")
+    (d / "misaki" / "ja.py").write_text(FAKE_MISAKI_JA, encoding="utf-8")
 
 
 def model(base: Path, name: str, voices: list[str], config: bool = False) -> Path:
     base.mkdir(parents=True, exist_ok=True)
     m = base / f"kokoro-{name}.onnx"
-    m.write_text("model")
+    m.write_text("model", encoding="utf-8")
     with zipfile.ZipFile(base / f"voices-{name}.bin", "w") as z:
         for v in voices:
             z.writestr(f"{v}.npy", "x")
     if config:
-        (base / "config.json").write_text("{}")
+        (base / "config.json").write_text("{}", encoding="utf-8")
     return m
 
 
@@ -110,7 +110,7 @@ def test_the_runner_writes_a_real_wav(env, tmp_path):
     e = {**env.vars, "PYTHONPATH": f"{Path(env.vars['XDG_DATA_HOME'])}/samvada/engines/kokoro"
                                    f"{os.pathsep}{Path(__file__).resolve().parents[1] / 'src'}"}
     r = subprocess.run([sys.executable, "-m", "samvada.kokoro", "--model", str(m), "--voice",
-                        "af_heart", "--lang", "en", "--out", str(out)], input="hi", text=True,
+                        "af_heart", "--lang", "en", "--out", str(out)], input="hi", text=True, encoding="utf-8", errors="replace",
                        env=e, capture_output=True)
     assert r.returncode == 0, r.stderr
     with wave.open(str(out)) as w:
@@ -138,7 +138,7 @@ def test_picker_lists_kokoro_per_language_and_saves(env):
 
 def test_doctor_checks_kokoro(env):
     for m in env.voices.glob("*.onnx"):
-        Path(f"{m}.json").write_text("{}")
+        Path(f"{m}.json").write_text("{}", encoding="utf-8")
     m = model(env.tmp / "kzh", "v1.1-zh", ["zf_001"])
     own(env, f'[zh]\nengine = "kokoro"\nmodel = "{m}"\nstyle = "zf_999"\n')
     r = env.run("doctor")
@@ -147,7 +147,7 @@ def test_doctor_checks_kokoro(env):
     assert "voice zf_999 is not in voices-v1.1-zh.bin" in r.stdout
     assert "kokoro-v1.1-zh.onnx needs its config.json beside it" in r.stdout
     engine(env)
-    (m.parent / "config.json").write_text("{}")
+    (m.parent / "config.json").write_text("{}", encoding="utf-8")
     own(env, f'[zh]\nengine = "kokoro"\nmodel = "{m}"\nstyle = "zf_001"\n')
     r = env.run("doctor")
     assert r.returncode == 0, r.stdout

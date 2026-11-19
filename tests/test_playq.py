@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def slow_player(env, seconds: float = 1.5) -> None:
     p = env.bin / "paplay"
     p.write_text(f'#!/bin/sh\necho "start $(basename "$1") $PPID $(date +%s.%N)" >> "$FAKE_LOG"\n'
-                 f'sleep {seconds}\necho "end $(basename "$1") $PPID $(date +%s.%N)" >> "$FAKE_LOG"\n')
+                 f'sleep {seconds}\necho "end $(basename "$1") $PPID $(date +%s.%N)" >> "$FAKE_LOG"\n', encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -26,7 +26,7 @@ def wait_for(pred, seconds: float = 20) -> bool:
 
 
 def log(env) -> list[str]:
-    return env.log.read_text().splitlines() if env.log.exists() else []
+    return env.log.read_text(encoding="utf-8").splitlines() if env.log.exists() else []
 
 
 def test_speak_returns_before_its_message_is_heard(env):
@@ -87,7 +87,7 @@ def test_a_message_whose_turn_does_not_come_is_dropped(env):
         r = env.run("speak", "en", "late", SAMVADA_MAX_WAIT="1", SAMVADA_WAIT="0")
         assert r.returncode == 0
         assert wait_for(lambda: "dropped, its turn did not come within 1 s" in
-                        (rt / "player.log").read_text() if (rt / "player.log").exists() else False)
+                        (rt / "player.log").read_text(encoding="utf-8") if (rt / "player.log").exists() else False)
     finally:
         os.close(fd)
     assert not [l for l in log(env) if l.startswith(("play ", "start "))]   # never played late
@@ -102,7 +102,7 @@ def test_a_killed_callers_folder_is_swept(env):
     old, new = rt / "msg.old", rt / "msg.new"
     for q in (old, new):
         q.mkdir()
-        (q / "1-en.wav").write_text("x")
+        (q / "1-en.wav").write_text("x", encoding="utf-8")
     t = time.time() - playq.ORPHAN_AGE - 5
     os.utime(old, (t, t))
     playq.sweep(rt)

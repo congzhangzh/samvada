@@ -85,7 +85,7 @@ def write_lock(path: Path, entries: list[dict]) -> None:
         out.append("[[file]]")
         out += [f"{k} = {v if isinstance(v, int) else json.dumps(v)}" for k, v in e.items()]
     out += ["[engines]", 'piper = "piper-tts==0"']
-    path.write_text("\n".join(out) + "\n")
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -131,7 +131,7 @@ def test_add_downloads_verifies_and_lays_out(env, hub):
     assert (own / "en_US-lessac-high.onnx").read_bytes() == b"M" * 5000
     assert (own / "g2pW" / "g2pw.onnx").is_file()  # the tar is unpacked into g2pW/
     snap = own / "hf/hub/models--bert-base-chinese"
-    assert (snap / "refs" / "main").read_text() == REV  # from_pretrained works offline
+    assert (snap / "refs" / "main").read_text(encoding="utf-8") == REV  # from_pretrained works offline
     assert (snap / "snapshots" / REV / "vocab.txt").is_file()
     assert not list(own.glob(".*.download")) and not list(own.glob("*.part"))
     assert "/datasets/org/ckpt/resolve/" in " ".join(hub.hits)
@@ -215,13 +215,13 @@ def test_managed_engine_is_preferred_over_path(env, hub, tmp_path):
     eng = tmp_path / "engines"
     mod = eng / "piper" / "piper"
     mod.mkdir(parents=True)
-    (mod / "__init__.py").write_text("")
+    (mod / "__init__.py").write_text("", encoding="utf-8")
     (mod / "__main__.py").write_text(
         "import os, sys\n"
         "a = sys.argv; out = a[a.index('-f') + 1]\n"
         "open(out, 'wb').write(b'RIFF')\n"
-        "open(os.environ['FAKE_LOG'], 'a').write('managed ' + a[a.index('-m') + 1] + '\\n')\n")
-    (eng / "piper" / ".python").write_text(f"{sys.version_info.major}.{sys.version_info.minor}\n")
+        "open(os.environ['FAKE_LOG'], 'a', encoding='utf-8').write('managed ' + a[a.index('-m') + 1] + '\\n')\n", encoding="utf-8")
+    (eng / "piper" / ".python").write_text(f"{sys.version_info.major}.{sys.version_info.minor}\n", encoding="utf-8")
     env.run("voices", "add", "en", "--engine", "never")
     r = env.run("en", "hi", SAMVADA="on", SAMVADA_ENGINES=str(eng))
     assert r.returncode == 0, r.stderr

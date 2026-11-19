@@ -74,7 +74,7 @@ def test_from_only_the_loose_files_renamed(env, hub, tmp_path):
     r = env.run("voices", "add", "zh", "--from", str(d), "--engine", "never")
     assert r.returncode == 0, r.stdout + r.stderr
     assert (hub.own / "g2pW" / "g2pw.onnx").is_file()  # the tar, matched and unpacked
-    assert (hub.own / "hf/hub/models--bert-base-chinese/refs/main").read_text() == REV
+    assert (hub.own / "hf/hub/models--bert-base-chinese/refs/main").read_text(encoding="utf-8") == REV
     assert env.run("voices", "verify", "zh").returncode == 0
     assert hub.hits == []
 

@@ -42,7 +42,9 @@ class Decision:
 def _run(argv: list[str], env: Mapping[str, str]) -> str | None:
     """A helper's stdout, or None when it is missing, fails or hangs."""
     try:
-        r = subprocess.run(argv, env=dict(env), capture_output=True, text=True, timeout=2)
+        # UTF-8 whatever the locale (a Chinese Windows is cp936); a byte it cannot read is replaced
+        r = subprocess.run(argv, env=dict(env), capture_output=True, text=True, timeout=2,
+                           encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout.strip() if r.returncode == 0 else None

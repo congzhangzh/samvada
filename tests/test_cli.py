@@ -54,7 +54,7 @@ def test_lang_flags_several_in_one_call(env):
     env.run("lang", "--enable-zh", "--disable-en")  # on and off together, one write
     env.run("speak", *FOUR, SAMVADA="on")
     assert env.played() == ["zh"]
-    assert (env.state / "samvada" / "langs").read_text().splitlines() == [
+    assert (env.state / "samvada" / "langs").read_text(encoding="utf-8").splitlines() == [
         "ja off", "fr off", "zh on", "en off"]
 
 
@@ -146,7 +146,7 @@ def test_presence_lock_idle_phone(env):
 
 def test_legacy_phone_mark_is_read(env):
     (env.state / "speak").mkdir()
-    (env.state / "speak" / "remote").write_text("")  # a chat bridge may still touch speak's mark
+    (env.state / "speak" / "remote").write_text("", encoding="utf-8")  # a chat bridge may still touch speak's mark
     r = env.run("en", "hi", FAKE_IDLE_MS="60000")
     assert "the phone was last" in r.stderr and env.played() == []
 
@@ -216,12 +216,12 @@ def test_status_lines(env):
 def test_migration_copies_speak_state_once(env):
     legacy = env.state / "speak"
     (legacy / "sessions" / "test-session").mkdir(parents=True)
-    (legacy / "langs").write_text("ja off\nfr off\n")
-    (legacy / "sessions" / "test-session" / "langs").write_text("fr on\n")
+    (legacy / "langs").write_text("ja off\nfr off\n", encoding="utf-8")
+    (legacy / "sessions" / "test-session" / "langs").write_text("fr on\n", encoding="utf-8")
     env.run("speak", *FOUR, SAMVADA="on")
     assert env.played() == ["en", "zh", "fr"]
     assert (legacy / "langs").exists()  # copied, never moved
-    (legacy / "langs").write_text("en off\n")  # later changes to speak are not followed
+    (legacy / "langs").write_text("en off\n", encoding="utf-8")  # later changes to speak are not followed
     env.run("speak", *FOUR, SAMVADA="on")
     assert env.played() == ["en", "zh", "fr"]
 

@@ -21,10 +21,10 @@ def trial(env) -> Path:
     d = env.tmp / "trial"
     d.mkdir()
     for n in ("en_GB-jenny_dioco-medium", "en_US-amy-medium"):
-        (d / f"{n}.onnx").write_text("model")
-        (d / f"{n}.onnx.json").write_text("{}")
-    (d / "en_GB-jenny_dioco-medium.MODEL_CARD").write_text("* License: See URL\n")
-    (d / "en_US-broken-medium.onnx").write_text("no json beside it")
+        (d / f"{n}.onnx").write_text("model", encoding="utf-8")
+        (d / f"{n}.onnx.json").write_text("{}", encoding="utf-8")
+    (d / "en_GB-jenny_dioco-medium.MODEL_CARD").write_text("* License: See URL\n", encoding="utf-8")
+    (d / "en_US-broken-medium.onnx").write_text("no json beside it", encoding="utf-8")
     return d
 
 
@@ -50,7 +50,7 @@ def test_a_pick_is_a_layer_and_the_owner_file_wins(env):
     assert v.license == "See URL" and v.origin["engine"] == "profile:balanced (yours)" and v.engine == "piper"
     assert v.origin["online"] == "default"
     assert pick.overridden("en", e) == ""
-    (cfg(env) / "voices.local.toml").write_text('[en]\nmodel = "en_US-lessac-high.onnx"\n')
+    (cfg(env) / "voices.local.toml").write_text('[en]\nmodel = "en_US-lessac-high.onnx"\n', encoding="utf-8")
     v = engines.load_voices(env=e)["en"]
     assert v.model == "en_US-lessac-high.onnx" and v.origin["model"] == "yours"
     assert "voices.local.toml sets en.model" in pick.overridden("en", e)
@@ -74,14 +74,14 @@ def test_pick_plain_plays_then_uses(env):
     assert any(l.startswith(f"piper {d}/en_GB-jenny_dioco-medium.onnx") for l in log)
     assert any(l.startswith("play sample.wav") for l in log)
     assert "en now uses en_GB-jenny_dioco-medium.onnx" in r.stdout
-    assert "en_GB-jenny_dioco-medium.onnx" in (cfg(env) / "profiles" / "balanced.toml").read_text()
+    assert "en_GB-jenny_dioco-medium.onnx" in (cfg(env) / "profiles" / "balanced.toml").read_text(encoding="utf-8")
     r = env.run("speak", "en", "hi")
     assert any(l.startswith(f"piper {d}/en_GB-jenny_dioco-medium.onnx") for l in env.lines())
 
 
 def jsons(env) -> None:
     for m in env.voices.glob("*.onnx"):
-        Path(f"{m}.json").write_text("{}")
+        Path(f"{m}.json").write_text("{}", encoding="utf-8")
 
 
 def test_doctor_all_well(env):
@@ -98,7 +98,7 @@ def test_doctor_names_a_missing_model_and_a_broken_file(env):
     r = env.run("doctor")
     assert r.returncode == 1
     assert "✗  fr" in r.stdout and "samvada voices add fr" in r.stdout
-    (cfg(env) / "voices.local.toml").write_text("[en]\nmodle = 1\n")
+    (cfg(env) / "voices.local.toml").write_text("[en]\nmodle = 1\n", encoding="utf-8")
     r = env.run("doctor")
     assert r.returncode == 2 and "unknown key modle" in r.stdout
 
@@ -110,7 +110,7 @@ def test_notes_facts_and_the_owner_own(env):
     assert r.returncode == 0, r.stderr
     assert "about: Jenny, an Irish woman" in r.stdout
     assert 'must name the voice "Jenny (Dioco)"' in r.stdout
-    notes = (cfg(env) / "voice-notes.toml").read_text()
+    notes = (cfg(env) / "voice-notes.toml").read_text(encoding="utf-8")
     assert '["en_GB-jenny_dioco-medium.onnx"]' in notes and "so sweet, my favourite" in notes
     r = env.run("voices", "pick", "en", "--dir", str(d), "--plain", input="q\n")
     assert "yours: so sweet, my favourite" in r.stdout
@@ -127,7 +127,7 @@ def test_a_new_sample_stops_the_old_one(env, monkeypatch):
     """The screen's Listener: play returns at once; the next play stops the one playing."""
     import time
     slow = env.bin / "paplay"
-    slow.write_text('#!/bin/sh\necho "play $(basename "$1")" >> "$FAKE_LOG"\nexec sleep 30\n')
+    slow.write_text('#!/bin/sh\necho "play $(basename "$1")" >> "$FAKE_LOG"\nexec sleep 30\n', encoding="utf-8")
     slow.chmod(0o755)
     for k in ("PATH", "FAKE_LOG", "SAMVADA_VOICES", "PIPER_DIR"):
         monkeypatch.setenv(k, env.vars[k])
@@ -148,13 +148,13 @@ def test_a_new_sample_stops_the_old_one(env, monkeypatch):
         assert time.time() - t0 < 1                        # returns at once
         assert wait_for(lambda: sound._proc is not None and "playing" in sound.status)
         # the fake player has really started (it logs first): only then stop it
-        assert wait_for(lambda: env.log.exists() and "play 1.wav" in env.log.read_text())
+        assert wait_for(lambda: env.log.exists() and "play 1.wav" in env.log.read_text(encoding="utf-8"))
         first = sound._proc
         sound.play(voices["en"], cs[1])
         assert first.poll() is not None                    # the old one was stopped
         assert wait_for(lambda: sound._proc is not None and sound._proc is not first)
         assert sound.status.startswith(f"playing {cs[1].name}")
-        assert wait_for(lambda: "play 2.wav" in env.log.read_text())
+        assert wait_for(lambda: "play 2.wav" in env.log.read_text(encoding="utf-8"))
         second = sound._proc
         sound.stop()
         assert second.poll() is not None and sound.status == "stopped"
@@ -167,9 +167,9 @@ def test_a_folder_per_language(env):
     root = env.tmp / "trials"
     for lang, name in (("en", "my-sweet-voice.onnx"), ("fr", "ma-voix.onnx")):
         (root / lang).mkdir(parents=True)
-        (root / lang / name).write_text("model")
-        (root / lang / f"{name}.json").write_text("{}")
-    (root / "en" / "no-json.onnx").write_text("model")
+        (root / lang / name).write_text("model", encoding="utf-8")
+        (root / lang / f"{name}.json").write_text("{}", encoding="utf-8")
+    (root / "en" / "no-json.onnx").write_text("model", encoding="utf-8")
     e = full(env)
     voices = engines.load_voices(env=e)
     dirs = paths.voices_dirs(e)
@@ -237,12 +237,12 @@ def test_a_pick_keeps_every_other_language_whole(env):
     prof = cfg(env) / "profiles"
     prof.mkdir()
     (prof / "balanced.toml").write_text('[ja]\nengine = "voicevox"\nmodel = "x.vvm"\nstyle = 30\n'
-                                        '[zh]\nmodel = "zh_CN-xiao_ya-medium.onnx"\n[zh.env]\nFOO = "1"\n')
+                                        '[zh]\nmodel = "zh_CN-xiao_ya-medium.onnx"\n[zh.env]\nFOO = "1"\n', encoding="utf-8")
     voices = engines.load_voices(env=e)
     c = pick.candidates("en", voices["en"], paths.voices_dirs(e), [trial(env)])[1]
     pick.save("en", c, e)
     import tomllib
-    data = tomllib.loads((prof / "balanced.toml").read_text())
+    data = tomllib.loads((prof / "balanced.toml").read_text(encoding="utf-8"))
     assert data["ja"]["style"] == 30 and data["zh"]["env"] == {"FOO": "1"}
     assert data["en"]["engine"] == "piper"
 
@@ -255,7 +255,7 @@ def test_piper_files_stay_piper_when_kokoro_speaks(env):
 
 
 def test_a_broken_map_still_lets_you_mute_and_pick(env):
-    (cfg(env) / "voices.local.toml").write_text('[en]\nmodle = "x"\n')
+    (cfg(env) / "voices.local.toml").write_text('[en]\nmodle = "x"\n', encoding="utf-8")
     assert env.run("mute", "tv").returncode == 0 and env.run("unmute").returncode == 0
     assert env.run("online").returncode == 0
     r = env.run("voices", "pick", "--table")

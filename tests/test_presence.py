@@ -65,7 +65,7 @@ def test_order_forced_and_mute_before_backends(state):
 
 def test_phone_newer_than_desktop_input(state, tmp_path):
     mark = tmp_path / "phone"
-    mark.write_text("")
+    mark.write_text("", encoding="utf-8")
     os.utime(mark, (990, 990))
     d = where(state, [mark], env={}, now=1000, backends=[Fake("b", idle=60)])
     assert not d.on and d.why == "the phone was last (10s ago; desktop idle 60s, b)"
@@ -75,7 +75,7 @@ def test_phone_newer_than_desktop_input(state, tmp_path):
 
 def test_no_backend_answers_falls_to_the_phone(state, tmp_path):
     mark = tmp_path / "phone"
-    mark.write_text("")
+    mark.write_text("", encoding="utf-8")
     now = int(time.time())
     none = [Fake("a"), presence.Pys()]
     d = where(state, [mark], env={}, now=now, backends=none)
@@ -143,10 +143,10 @@ def test_macos_parsing():
 
 def test_macos_backend_through_a_fake_ioreg(monkeypatch, tmp_path):
     fake = tmp_path / "ioreg"
-    (tmp_path / "hid").write_text(IOREG_HID)
-    (tmp_path / "root").write_text(IOREG_ROOT_LOCKED)
+    (tmp_path / "hid").write_text(IOREG_HID, encoding="utf-8")
+    (tmp_path / "root").write_text(IOREG_ROOT_LOCKED, encoding="utf-8")
     fake.write_text(f'#!/bin/sh\ncase "$*" in *IOHIDSystem*) cat {tmp_path}/hid ;; '
-                    f'*Root*) cat {tmp_path}/root ;; esac\n')
+                    f'*Root*) cat {tmp_path}/root ;; esac\n', encoding="utf-8")
     fake.chmod(0o755)
     env = {"PATH": f"{tmp_path}:/usr/bin:/bin"}
     m = presence.MacOS()

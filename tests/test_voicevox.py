@@ -31,7 +31,7 @@ class Synthesizer:
     def __init__(self, ort, ojt): self.model = None
     def load_voice_model(self, m): self.model = m.p
     def tts(self, text, style):
-        with open(os.environ["FAKE_LOG"], "a") as f:
+        with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as f:
             f.write(f"voicevox {os.path.basename(self.model)} {style} {text}\\n")
         return b"RIFF"
 '''
@@ -56,7 +56,7 @@ def vv_tree(base: Path) -> Path:
     """A VOICEVOX download: onnxruntime/, dict/, models/vvms/1.vvm with Himari and a song."""
     r = base / "voicevox_core"
     (r / "onnxruntime" / "lib").mkdir(parents=True)
-    (r / "onnxruntime" / "lib" / "libvoicevox_onnxruntime.so.1.17.3").write_text("lib")
+    (r / "onnxruntime" / "lib" / "libvoicevox_onnxruntime.so.1.17.3").write_text("lib", encoding="utf-8")
     (r / "dict" / "open_jtalk_dic_utf_8-1.11").mkdir(parents=True)
     vvms = r / "models" / "vvms"
     vvms.mkdir(parents=True)
@@ -72,8 +72,8 @@ def vv_tree(base: Path) -> Path:
 def engine(env) -> None:
     d = Path(env.vars["XDG_DATA_HOME"]) / "samvada" / "engines" / "voicevox" / "voicevox_core"
     d.mkdir(parents=True)
-    (d / "__init__.py").write_text("")
-    (d / "blocking.py").write_text(FAKE_CORE)
+    (d / "__init__.py").write_text("", encoding="utf-8")
+    (d / "blocking.py").write_text(FAKE_CORE, encoding="utf-8")
 
 
 def full(env) -> dict:
@@ -149,7 +149,7 @@ def test_picker_plays_himari(env):
 def test_doctor_checks_voicevox(env):
     vvm = vv_tree(env.tmp)
     for m in env.voices.glob("*.onnx"):
-        Path(f"{m}.json").write_text("{}")
+        Path(f"{m}.json").write_text("{}", encoding="utf-8")
     own(env, f'[ja]\nengine = "voicevox"\nmodel = "{vvm}"\nstyle = 14\n')
     r = env.run("doctor")
     assert r.returncode == 1 and "engine voicevox not installed" in r.stdout
@@ -201,7 +201,7 @@ def test_another_speaker_in_the_same_file_drops_the_old_credit(env):
     engine(env)  # a profile's voice applies only where its engine is installed
     d = Path(env.vars["HOME"]) / ".config" / "samvada" / "profiles"
     d.mkdir(parents=True)
-    (d / "balanced.toml").write_text(f'[ja]\nengine = "voicevox"\nmodel = "{vvm}"\nstyle = 3\ncredit = "VOICEVOX:other"\n')
+    (d / "balanced.toml").write_text(f'[ja]\nengine = "voicevox"\nmodel = "{vvm}"\nstyle = 3\ncredit = "VOICEVOX:other"\n', encoding="utf-8")
     # the local file names only another style: the credit of style 3's speaker must not stay
     own(env, '[ja]\nstyle = "14"\n')
     v = engines.load_voices(env=full(env))["ja"]

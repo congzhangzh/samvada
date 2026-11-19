@@ -30,12 +30,12 @@ def _session_dir(state: State, session_id: str) -> Path | None:
 
 def _stamp(d: Path, name: str) -> None:
     d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(f"{time.time():.3f}\n")
+    (d / name).write_text(f"{time.time():.3f}\n", encoding="utf-8")
 
 
 def _read(d: Path, name: str) -> float:
     try:
-        return float((d / name).read_text().strip())
+        return float((d / name).read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return 0.0
 
@@ -85,7 +85,8 @@ def stop(event: dict, state: State, decide) -> str | None:
 
 def run(kind: str, state: State, decide) -> int:
     try:
-        event = json.loads(sys.stdin.read() or "{}")
+        # the harness writes UTF-8 whatever the locale: read the bytes, not the locale's text
+        event = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace") or "{}")
     except (ValueError, OSError):
         event = {}
     try:

@@ -28,7 +28,7 @@ def test_no_owner_file_is_the_package_map(env):
 
 
 def test_one_key_changes_only_that_key(env):
-    own_file(env).write_text('[en]\nmodel = "en_GB-jenny_dioco-medium.onnx"\n')
+    own_file(env).write_text('[en]\nmodel = "en_GB-jenny_dioco-medium.onnx"\n', encoding="utf-8")
     v = load(env)["en"]
     assert v.model == "en_GB-jenny_dioco-medium.onnx"
     assert v.engine == "piper" and v.online == "en-US-AvaMultilingualNeural"
@@ -36,44 +36,44 @@ def test_one_key_changes_only_that_key(env):
 
 
 def test_env_tables_merge_by_key(env):
-    own_file(env).write_text('[zh.env]\nEXTRA = "1"\n')
+    own_file(env).write_text('[zh.env]\nEXTRA = "1"\n', encoding="utf-8")
     v = load(env)["zh"]
     assert v.env == {"HF_HUB_OFFLINE": "1", "EXTRA": "1"}
     assert v.origin["env.EXTRA"] == "yours" and v.origin["env.HF_HUB_OFFLINE"] == "default"
 
 
 def test_a_new_language_comes_after_the_package_ones(env):
-    own_file(env).write_text('[de]\nengine = "piper"\nmodel = "de.onnx"\nonline = "de-DE-KatjaNeural"\n')
+    own_file(env).write_text('[de]\nengine = "piper"\nmodel = "de.onnx"\nonline = "de-DE-KatjaNeural"\n', encoding="utf-8")
     assert list(load(env)) == ["en", "zh", "ja", "fr", "de"]
 
 
 def test_a_new_language_needs_all_three_keys(env):
-    own_file(env).write_text('[de]\nmodel = "de.onnx"\n')
+    own_file(env).write_text('[de]\nmodel = "de.onnx"\n', encoding="utf-8")
     r = env.run("status")
     assert r.returncode == 2
     assert "voices.local.toml: [de] is a new language: it needs engine, online" in r.stderr
 
 
 def test_a_typo_stops_with_the_file_and_the_key(env):
-    own_file(env).write_text('[en]\nmodle = "x.onnx"\n')
+    own_file(env).write_text('[en]\nmodle = "x.onnx"\n', encoding="utf-8")
     r = env.run("speak", "en", "hi")
     assert r.returncode == 2
     assert "voices.local.toml: [en] unknown key modle" in r.stderr
-    own_file(env).write_text('[en\n')
+    own_file(env).write_text('[en\n', encoding="utf-8")
     r = env.run("status")
     assert r.returncode == 2 and "not TOML" in r.stderr
 
 
 def test_a_typo_never_breaks_the_hooks(env):
-    own_file(env).write_text('[en]\nmodle = "x.onnx"\n')
+    own_file(env).write_text('[en]\nmodle = "x.onnx"\n', encoding="utf-8")
     r = env.run("hook", "prompt")
     assert r.returncode == 0, r.stderr
 
 
 def test_the_voice_map_variable_stands_alone(env, tmp_path):
-    own_file(env).write_text('[en]\nmodel = "mine.onnx"\n')
+    own_file(env).write_text('[en]\nmodel = "mine.onnx"\n', encoding="utf-8")
     other = tmp_path / "map.toml"
-    other.write_text('[en]\nengine = "piper"\nmodel = "other.onnx"\nonline = "x"\n')
+    other.write_text('[en]\nengine = "piper"\nmodel = "other.onnx"\nonline = "x"\n', encoding="utf-8")
     voices = load(env, SAMVADA_VOICE_MAP=str(other))
     assert list(voices) == ["en"] and voices["en"].model == "other.onnx"
     assert voices["en"].origin["model"] == "map"
@@ -82,15 +82,15 @@ def test_the_voice_map_variable_stands_alone(env, tmp_path):
 def test_a_model_path_with_tilde_is_spoken(env):
     home = Path(env.vars["HOME"])
     (home / "trial").mkdir()
-    (home / "trial" / "jenny.onnx").write_text("model")
-    own_file(env).write_text('[en]\nmodel = "~/trial/jenny.onnx"\n')
+    (home / "trial" / "jenny.onnx").write_text("model", encoding="utf-8")
+    own_file(env).write_text('[en]\nmodel = "~/trial/jenny.onnx"\n', encoding="utf-8")
     r = env.run("speak", "en", "hello")
     assert r.returncode == 0, r.stderr
     assert any(l.startswith(f"piper {home}/trial/jenny.onnx") for l in env.lines())
 
 
 def test_config_list_shows_each_layer(env):
-    own_file(env).write_text('[fr]\nmodel = "fr_FR-upmc-medium.onnx"\n')
+    own_file(env).write_text('[fr]\nmodel = "fr_FR-upmc-medium.onnx"\n', encoding="utf-8")
     r = env.run("config", "--list")
     assert r.returncode == 0, r.stderr
     rows = [l.split() for l in r.stdout.splitlines()]
@@ -105,39 +105,39 @@ def test_config_init_writes_once_and_never_again(env):
     r = env.run("config", "--init")
     assert r.returncode == 0 and p.is_file()
     assert set(load(env)["en"].origin.values()) == {"default"}
-    p.write_text('[en]\nmodel = "mine.onnx"\n')
+    p.write_text('[en]\nmodel = "mine.onnx"\n', encoding="utf-8")
     assert "left as it is" in env.run("config", "--init").stdout
-    assert p.read_text() == '[en]\nmodel = "mine.onnx"\n'
+    assert p.read_text(encoding="utf-8") == '[en]\nmodel = "mine.onnx"\n'
 
 
 def test_setup_never_touches_the_owner_file(env):
     p = own_file(env)
     body = '# mine\n[en]\nmodel = "en_US-lessac-high.onnx"\n'
-    p.write_text(body)
+    p.write_text(body, encoding="utf-8")
     extra = {"CLAUDE_CONFIG_DIR": str(env.tmp / "claude")}
     for args in (["setup"], ["setup", "--uninstall"], ["setup"]):
         r = env.run(*args, **extra)
         assert r.returncode == 0, r.stderr
-    assert p.read_text() == body
+    assert p.read_text(encoding="utf-8") == body
 
 
 def test_a_new_model_drops_the_old_terms(env):
-    own_file(env).write_text('[ja]\nengine = "piper"\nmodel = "ja_x.onnx"\n')
+    own_file(env).write_text('[ja]\nengine = "piper"\nmodel = "ja_x.onnx"\n', encoding="utf-8")
     v = load(env)["ja"]
     assert v.credit == "" and v.license == "" and "credit" not in v.origin
-    own_file(env).write_text('[ja]\nmodel = "ja_x.onnx"\ncredit = "mine"\n')
+    own_file(env).write_text('[ja]\nmodel = "ja_x.onnx"\ncredit = "mine"\n', encoding="utf-8")
     assert load(env)["ja"].credit == "mine"
-    own_file(env).write_text('[zh]\nengine = "piper-plus"\nmodel = "zh_x.onnx"\n')
+    own_file(env).write_text('[zh]\nengine = "piper-plus"\nmodel = "zh_x.onnx"\n', encoding="utf-8")
     assert load(env)["zh"].env == {}                    # engine settings went with the engine
-    own_file(env).write_text('[zh]\nmodel = "zh_x.onnx"\n')
+    own_file(env).write_text('[zh]\nmodel = "zh_x.onnx"\n', encoding="utf-8")
     assert load(env)["zh"].env == {"HF_HUB_OFFLINE": "1"}   # same engine: kept
 
 
 def test_a_model_path_works_when_the_first_voices_folder_is_missing(env):
     home = Path(env.vars["HOME"])
     (home / "trial").mkdir()
-    (home / "trial" / "jenny.onnx").write_text("model")
-    own_file(env).write_text(f'[en]\nmodel = "{home}/trial/jenny.onnx"\n')
+    (home / "trial" / "jenny.onnx").write_text("model", encoding="utf-8")
+    own_file(env).write_text(f'[en]\nmodel = "{home}/trial/jenny.onnx"\n', encoding="utf-8")
     r = env.run("speak", "en", "hello", SAMVADA_VOICES=str(home / "missing"))
     assert r.returncode == 0, r.stderr
     assert any(f"cwd={home}/trial" in l for l in env.lines())

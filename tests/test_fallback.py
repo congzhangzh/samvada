@@ -16,7 +16,7 @@ class Kokoro:
     @classmethod
     def from_session(cls, s, voices, vocab_config=None): raise TypeError("fake")
     def create(self, text, voice, speed=1.0, lang="en-us", is_phonemes=False):
-        with open(os.environ["FAKE_LOG"], "a") as f:
+        with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as f:
             f.write(f"kokoro {self.model} {voice} {text}\\n")
         class A(list):
             def clip(self, a, b): return self
@@ -30,21 +30,21 @@ class Kokoro:
 def kokoro_installed(env, langs=("en", "zh")) -> None:
     d = Path(env.vars["XDG_DATA_HOME"]) / "samvada" / "engines" / "kokoro"
     (d / "kokoro_onnx").mkdir(parents=True, exist_ok=True)
-    (d / "kokoro_onnx" / "__init__.py").write_text(FAKE_KOKORO)
+    (d / "kokoro_onnx" / "__init__.py").write_text(FAKE_KOKORO, encoding="utf-8")
     (d / "misaki").mkdir(exist_ok=True)
-    (d / "misaki" / "__init__.py").write_text("")
+    (d / "misaki" / "__init__.py").write_text("", encoding="utf-8")
     (d / "misaki" / "zh.py").write_text("class ZHG2P:\n    def __init__(self, version=None): pass\n"
-                                        "    def __call__(self, t): return (t, None)\n")
+                                        "    def __call__(self, t): return (t, None)\n", encoding="utf-8")
     for lang, (folder, name, voice) in {"en": ("v1.0", "v1.0", "af_heart"),
                                         "zh": ("v1.1-zh", "v1.1-zh", "zf_001")}.items():
         if lang not in langs:
             continue
         m = env.voices / "kokoro" / folder
         m.mkdir(parents=True, exist_ok=True)
-        (m / f"kokoro-{name}.onnx").write_text("m")
+        (m / f"kokoro-{name}.onnx").write_text("m", encoding="utf-8")
         with zipfile.ZipFile(m / f"voices-{name}.bin", "w") as z:
             z.writestr(f"{voice}.npy", "x")
-        (m / "config.json").write_text("{}")
+        (m / "config.json").write_text("{}", encoding="utf-8")
 
 
 def kokoro_lines(env) -> list[str]:
@@ -100,7 +100,7 @@ def test_kokoro_as_the_default_and_piper_as_its_fallback(env):
     d = Path(env.vars["HOME"]) / ".config" / "samvada"
     d.mkdir(parents=True)
     (d / "voices.local.toml").write_text('[en]\nengine = "kokoro"\nmodel = "kokoro/v1.0/kokoro-v1.0.onnx"\n'
-                                         'style = "af_heart"\n')
+                                         'style = "af_heart"\n', encoding="utf-8")
     v = engines.load_voices(env={**env.vars, "XDG_CONFIG_HOME": str(d.parent)})["en"]
     assert (v.engine, v.fallback.engine, v.fallback.model) == ("kokoro", "piper", "en_US-lessac-high.onnx")
     r = env.run("speak", "en", "hi")
@@ -112,7 +112,7 @@ def test_kokoro_as_the_default_and_piper_as_its_fallback(env):
 
 def test_doctor_and_status_show_the_order(env):
     for m in env.voices.glob("*.onnx"):
-        Path(f"{m}.json").write_text("{}")
+        Path(f"{m}.json").write_text("{}", encoding="utf-8")
     r = env.run("doctor")
     assert "order: piper en_US-lessac-high → kokoro af_heart (no voice pack; samvada voices add en --kokoro) → online: off" in r.stdout
     kokoro_installed(env)
@@ -123,9 +123,9 @@ def test_doctor_and_status_show_the_order(env):
 def test_the_fallback_table_is_checked(env):
     d = Path(env.vars["HOME"]) / ".config" / "samvada"
     d.mkdir(parents=True)
-    (d / "voices.local.toml").write_text('[en.fallback]\nmodle = "x"\n')
+    (d / "voices.local.toml").write_text('[en.fallback]\nmodle = "x"\n', encoding="utf-8")
     r = env.run("status")
     assert r.returncode == 2 and "[en.fallback] unknown key modle" in r.stderr
-    (d / "voices.local.toml").write_text('[en.fallback]\nstyle = "af_bella"\n')
+    (d / "voices.local.toml").write_text('[en.fallback]\nstyle = "af_bella"\n', encoding="utf-8")
     v = engines.load_voices(env={**env.vars, "XDG_CONFIG_HOME": str(d.parent)})["en"]
     assert v.fallback.style == "af_bella" and v.fallback.model == "kokoro/v1.0/kokoro-v1.0.onnx"

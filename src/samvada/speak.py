@@ -77,12 +77,13 @@ def _start_player(qdir: Path, env: Mapping[str, str], background: bool):
     """The player of this message's clips: a detached background process, or (when the
     caller waits) a child the caller waits for."""
     cmd = [sys.executable, "-m", "samvada.playq", str(qdir)]
+    env = {**env, "PYTHONUTF8": "1"}  # every Python child of Samvada runs in UTF-8 mode
     if background:
         log = qdir.parent / "player.log"
         with open(log, "ab") as out:
-            return subprocess.Popen(cmd, env=dict(env), stdin=subprocess.DEVNULL, stdout=out,
+            return subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=out, start_new_session=True, close_fds=True)
-    return subprocess.Popen(cmd, env=dict(env), stdin=subprocess.DEVNULL)
+    return subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL)
 
 
 def speak(pairs: list[tuple[str, str]], *, state: State, voices: dict[str, Voice],

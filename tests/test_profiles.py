@@ -39,14 +39,14 @@ style = "ff_siwis"
 def own_profile(env, name: str = "learn", text: str = LEARN) -> Path:
     d = cfg(env) / "profiles"
     d.mkdir(exist_ok=True)
-    (d / f"{name}.toml").write_text(text)
+    (d / f"{name}.toml").write_text(text, encoding="utf-8")
     return d / f"{name}.toml"
 
 
 def builtin(monkeypatch, tmp_path, text: str = LEARN):
     """A built-in profile `learn` for the in-process tests (the package ships none but balanced)."""
     f = tmp_path / "builtin-learn.toml"
-    f.write_text(text)
+    f.write_text(text, encoding="utf-8")
     monkeypatch.setattr(engines, "builtin_profiles", lambda: {"balanced": None, "learn": f})
 
 
@@ -60,7 +60,7 @@ def learn_files(env, engine: bool = True) -> None:
         kokoro_engine(env)
     k = env.voices / "kokoro" / "v1.0"
     k.mkdir(parents=True)
-    (k / "kokoro-v1.0.onnx").write_text("m")
+    (k / "kokoro-v1.0.onnx").write_text("m", encoding="utf-8")
     with zipfile.ZipFile(k / "voices-v1.0.bin", "w") as z:
         for v in ("af_heart", "ff_siwis"):
             z.writestr(f"{v}.npy", "x")
@@ -97,7 +97,7 @@ def test_yours_overrides_the_built_in_profile_key_by_key(env, monkeypatch, tmp_p
     v = engines.load_voices(env=full(env))["en"]
     assert (v.engine, v.style) == ("kokoro", "af_bella")
     assert v.origin["style"] == "profile:learn (yours)" and v.origin["model"] == "profile:learn"
-    (cfg(env) / "voices.local.toml").write_text('[en]\nstyle = "af_nicole"\n')
+    (cfg(env) / "voices.local.toml").write_text('[en]\nstyle = "af_nicole"\n', encoding="utf-8")
     assert engines.load_voices(env=full(env))["en"].style == "af_nicole"   # local wins over all
 
 
@@ -126,14 +126,14 @@ def test_the_picker_fills_the_profile_in_force(env):
 
 
 def test_the_older_picker_file_is_the_like_profile(env):
-    (cfg(env) / "voices.toml").write_text('[en]\nmodel = "en_US-lessac-high.onnx"\ncredit = "old"\n')
+    (cfg(env) / "voices.toml").write_text('[en]\nmodel = "en_US-lessac-high.onnx"\ncredit = "old"\n', encoding="utf-8")
     env.run("profile", "use", "like")
     v = engines.load_voices(env=full(env))["en"]
     assert v.credit == "old" and v.origin["credit"] == "profile:like (yours)"
     # the first pick writes profiles/like.toml from it, and leaves voices.toml in place
     c = pick.candidates("fr", engines.load_voices(env=full(env))["fr"], [env.voices])[0]
     pick.save("fr", c, full(env))
-    like = (cfg(env) / "profiles" / "like.toml").read_text()
+    like = (cfg(env) / "profiles" / "like.toml").read_text(encoding="utf-8")
     assert "[en]" in like and "[fr]" in like and (cfg(env) / "voices.toml").is_file()
 
 

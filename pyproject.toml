@@ -2,7 +2,7 @@
 # The import is samvada and the command samvada. A release stamps its version, <YYYYMMDD>.<N>,
 # here and in src/samvada/__init__.py.
 name = "samvada"
-version = "20261119.1"
+version = "20261119.2"
 description = "Samvada: a voice and the habits of a language tutor for AI agents, offline first"
 readme = "README.md"
 authors = [
@@ -65,3 +65,6 @@ voice-packages = "20261117.1"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# With `python -X warn_default_encoding -m pytest` the tests' own process is held to UTF-8 too;
+# the children of every test are, always (tests/conftest.py).
+filterwarnings = ["error::EncodingWarning"]

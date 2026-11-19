@@ -12,72 +12,72 @@ import pytest
 def claude(env, tmp_path):
     d = tmp_path / "claude"
     d.mkdir()
-    (d / "CLAUDE.md").write_text("# My rules\n\nKeep this.\n")
+    (d / "CLAUDE.md").write_text("# My rules\n\nKeep this.\n", encoding="utf-8")
     (d / "settings.json").write_text(json.dumps({
         "model": "x",
         "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "other-tool hook"}]}]},
-    }, indent=1) + "\n")
+    }, indent=1) + "\n", encoding="utf-8")
     env.vars |= {"CLAUDE_CONFIG_DIR": str(d), "XDG_CONFIG_HOME": str(tmp_path / "config")}
     return d
 
 
 def test_dry_run_changes_nothing(env, claude):
-    before = {p.name: p.read_text() for p in claude.iterdir()}
+    before = {p.name: p.read_text(encoding="utf-8") for p in claude.iterdir()}
     r = env.run("setup", "--dry-run")
     assert r.returncode == 0 and "dry run: nothing changed" in r.stdout
     assert "add the block to" in r.stdout and "install" in r.stdout
-    assert {p.name: p.read_text() for p in claude.iterdir()} == before
+    assert {p.name: p.read_text(encoding="utf-8") for p in claude.iterdir()} == before
 
 
 def test_setup_installs_rule_skill_hooks_and_keeps_the_rest(env, claude):
     r = env.run("setup", "--native", "zh", "--langs", "en,zh,ja,fr")
     assert r.returncode == 0, r.stderr
-    md = (claude / "CLAUDE.md").read_text()
+    md = (claude / "CLAUDE.md").read_text(encoding="utf-8")
     assert md.startswith("# My rules\n\nKeep this.\n")
     assert "samvada:begin" in md and "samvada:end" in md
     assert "native language is Chinese" in md and "English, Japanese, French" in md
     assert "🇺🇸 EN, 🔤 IPA, 🇨🇳 ZH" in md
-    assert (claude / "skills/samvada/SKILL.md").read_text().startswith("---\nname: samvada")
-    s = json.loads((claude / "settings.json").read_text())
+    assert (claude / "skills/samvada/SKILL.md").read_text(encoding="utf-8").startswith("---\nname: samvada")
+    s = json.loads((claude / "settings.json").read_text(encoding="utf-8"))
     assert s["model"] == "x"
     stop = [h["command"] for e in s["hooks"]["Stop"] for h in e["hooks"]]
     assert stop[0] == "other-tool hook" and stop[1].endswith("-m samvada hook stop")
     assert s["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"].endswith("hook prompt")
-    assert (claude / "settings.json").read_text().startswith('{\n "model"')  # indent kept
+    assert (claude / "settings.json").read_text(encoding="utf-8").startswith('{\n "model"')  # indent kept
     assert list(claude.glob("CLAUDE.md.samvada-backup-*")) and list(claude.glob("settings.json.samvada-backup-*"))
     # the settings are remembered, and a second run changes nothing
     r = env.run("setup")
-    assert "nothing to change" in r.stdout and md == (claude / "CLAUDE.md").read_text()
-    assert len(json.loads((claude / "settings.json").read_text())["hooks"]["Stop"]) == 2
+    assert "nothing to change" in r.stdout and md == (claude / "CLAUDE.md").read_text(encoding="utf-8")
+    assert len(json.loads((claude / "settings.json").read_text(encoding="utf-8"))["hooks"]["Stop"]) == 2
 
 
 def test_setup_updates_the_block_in_place(env, claude):
     env.run("setup", "--langs", "en,zh")
-    (claude / "CLAUDE.md").write_text((claude / "CLAUDE.md").read_text() + "\n## Later section\n")
+    (claude / "CLAUDE.md").write_text((claude / "CLAUDE.md").read_text(encoding="utf-8") + "\n## Later section\n", encoding="utf-8")
     env.run("setup", "--langs", "en,zh,fr", "--no-ipa")
-    md = (claude / "CLAUDE.md").read_text()
+    md = (claude / "CLAUDE.md").read_text(encoding="utf-8")
     assert md.count("samvada:begin") == 1 and "## Later section" in md and "🔤 IPA" not in md and "French" in md
 
 
 def test_uninstall_removes_exactly_what_it_added(env, claude):
-    before_md = (claude / "CLAUDE.md").read_text()
-    before_settings = json.loads((claude / "settings.json").read_text())
+    before_md = (claude / "CLAUDE.md").read_text(encoding="utf-8")
+    before_settings = json.loads((claude / "settings.json").read_text(encoding="utf-8"))
     env.run("setup")
     r = env.run("setup", "--uninstall")
     assert r.returncode == 0, r.stderr
-    assert (claude / "CLAUDE.md").read_text() == before_md
-    assert json.loads((claude / "settings.json").read_text()) == before_settings
+    assert (claude / "CLAUDE.md").read_text(encoding="utf-8") == before_md
+    assert json.loads((claude / "settings.json").read_text(encoding="utf-8")) == before_settings
     assert not (claude / "skills/samvada").exists()
 
 
 def test_a_skill_folder_that_is_not_ours_is_left_alone(env, claude):
     mine = claude / "skills/samvada"
     mine.mkdir(parents=True)
-    (mine / "SKILL.md").write_text("my own")
+    (mine / "SKILL.md").write_text("my own", encoding="utf-8")
     r = env.run("setup")
-    assert "is not Samvada's: left alone" in r.stdout and (mine / "SKILL.md").read_text() == "my own"
+    assert "is not Samvada's: left alone" in r.stdout and (mine / "SKILL.md").read_text(encoding="utf-8") == "my own"
     env.run("setup", "--uninstall")
-    assert (mine / "SKILL.md").read_text() == "my own"
+    assert (mine / "SKILL.md").read_text(encoding="utf-8") == "my own"
 
 
 def test_codex_gets_agents_md_and_skill_no_hooks(env, tmp_path):
@@ -85,7 +85,7 @@ def test_codex_gets_agents_md_and_skill_no_hooks(env, tmp_path):
     env.vars |= {"CODEX_HOME": str(codex), "XDG_CONFIG_HOME": str(tmp_path / "config")}
     r = env.run("setup", "--agent", "codex")
     assert r.returncode == 0, r.stderr
-    assert "samvada:begin" in (codex / "AGENTS.md").read_text()
+    assert "samvada:begin" in (codex / "AGENTS.md").read_text(encoding="utf-8")
     assert (codex / "skills/samvada/SKILL.md").exists() and not (codex / "settings.json").exists()
 
 
@@ -100,7 +100,7 @@ def hook(env, kind, event, **extra):
     import subprocess, sys
     return subprocess.run([sys.executable, "-m", "samvada", "hook", kind], input=json.dumps(event),
                           env={**env.vars, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"), **extra},
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 SID = "abc-123"
@@ -150,7 +150,7 @@ def test_speak_alias_is_opt_in_and_runs_samvada_speak(env, claude, bindir):
     assert not (bindir / "speak").exists()  # not asked for: nothing
     r = env.run("setup", "--speak-alias")
     assert r.returncode == 0, r.stderr
-    text = (bindir / "speak").read_text()
+    text = (bindir / "speak").read_text(encoding="utf-8")
     assert "managed by `samvada setup --speak-alias`" in text and '-m samvada speak "$@"' in text
     assert (bindir / "speak").stat().st_mode & 0o111
     assert "unchanged at" in env.run("setup").stdout  # remembered in tutor.toml
@@ -160,15 +160,15 @@ def test_speak_alias_is_opt_in_and_runs_samvada_speak(env, claude, bindir):
 
 def test_speak_alias_leaves_a_foreign_speak_alone_unless_replace(env, claude, bindir):
     foreign = bindir / "speak"
-    foreign.write_text("#!/bin/sh\necho the old wrapper\n")
+    foreign.write_text("#!/bin/sh\necho the old wrapper\n", encoding="utf-8")
     r = env.run("setup", "--speak-alias")
-    assert "is not Samvada's: left alone" in r.stdout and foreign.read_text().endswith("old wrapper\n")
+    assert "is not Samvada's: left alone" in r.stdout and foreign.read_text(encoding="utf-8").endswith("old wrapper\n")
     r = env.run("setup", "--speak-alias=replace")
-    assert "replace" in r.stdout and "managed by `samvada setup" in foreign.read_text()
+    assert "replace" in r.stdout and "managed by `samvada setup" in foreign.read_text(encoding="utf-8")
     backups = list(bindir.glob("speak.samvada-backup-*"))
-    assert len(backups) == 1 and backups[0].read_text().endswith("old wrapper\n")
+    assert len(backups) == 1 and backups[0].read_text(encoding="utf-8").endswith("old wrapper\n")
     env.run("setup", "--uninstall")  # removes ours and puts the old one back
-    assert foreign.read_text().endswith("old wrapper\n") and not list(bindir.glob("speak.samvada-backup-*"))
+    assert foreign.read_text(encoding="utf-8").endswith("old wrapper\n") and not list(bindir.glob("speak.samvada-backup-*"))
 
 
 def test_speak_alias_actually_speaks(env, claude, bindir):

@@ -82,7 +82,7 @@ def config_path(env: Mapping[str, str] = os.environ) -> Path:
 def load_tutor(env: Mapping[str, str] = os.environ) -> Tutor:
     t = default_tutor(env)
     try:
-        d = tomllib.loads(config_path(env).read_text())
+        d = tomllib.loads(config_path(env).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return t
     return Tutor(d.get("native", t.native), tuple(d.get("langs", t.langs)), bool(d.get("ipa", True)),
@@ -95,7 +95,7 @@ def save_tutor(t: Tutor, env: Mapping[str, str] = os.environ) -> None:
     langs = ", ".join(f'"{l}"' for l in t.langs)
     p.write_text(f'# Written by `samvada setup`; run it again after a change.\nnative = "{t.native}"\n'
                  f"langs = [{langs}]\nipa = {'true' if t.ipa else 'false'}\n"
-                 f"speak_alias = {'true' if t.speak_alias else 'false'}\n")
+                 f"speak_alias = {'true' if t.speak_alias else 'false'}\n", encoding="utf-8")
 
 
 def render_rule(t: Tutor) -> str:
@@ -107,7 +107,7 @@ def render_rule(t: Tutor) -> str:
             rows.append("🔤 IPA")
     ipa = (" The IPA row transcribes the whole English row (General American): slashes, stress "
            "marks, the flap ɾ, weak forms as spoken.") if t.ipa and "en" in t.langs else ""
-    body = resources.files("samvada").joinpath("agents", "rule.md").read_text().format(
+    body = resources.files("samvada").joinpath("agents", "rule.md").read_text(encoding="utf-8").format(
         native=NAMES[t.native], learning=", ".join(learning), rows=", ".join(rows), ipa=ipa,
         order=", ".join(NAMES[l] for l in t.langs) + " (each language once)")
     return f"{BEGIN}\n{body.rstrip()}\n{END}\n"
@@ -176,7 +176,7 @@ def _alias_steps(t: Tutor, uninstall: bool, replace: bool, env: Mapping[str, str
         back = f", put back {backups[-1].name}" if backups else ""
         return [Step("alias", f"remove {target}{back}", remove)]
     text = alias_text()
-    if ours and target.read_text() == text:
+    if ours and target.read_text(encoding="utf-8") == text:
         return [Step("alias", f"unchanged at {target}")]
     if exists and not ours and not replace:
         return [Step("alias", f"{target} exists and is not Samvada's: left alone "
@@ -188,7 +188,7 @@ def _alias_steps(t: Tutor, uninstall: bool, replace: bool, env: Mapping[str, str
             target.rename(target.with_name(f"{target.name}.samvada-backup-{time.strftime('%Y%m%d-%H%M%S')}"))
         elif target.is_symlink():
             target.unlink()
-        target.write_text(text, newline="")
+        target.write_text(text, newline="", encoding="utf-8")
         target.chmod(0o755)
     verb = "replace (the old one kept as a backup)" if exists and not ours else ("update" if ours else "add")
     steps = [Step("alias", f"{verb} {target}: speak runs samvada speak", write)]
@@ -210,7 +210,7 @@ def plan(agent: str, t: Tutor, uninstall: bool, env: Mapping[str, str] = os.envi
 
     # 1. rule
     rule_file = home / ("CLAUDE.md" if agent == "claude" else "AGENTS.md")
-    old = rule_file.read_text() if rule_file.exists() else ""
+    old = rule_file.read_text(encoding="utf-8") if rule_file.exists() else ""
     stripped = BLOCK_RE.sub("\n", old).rstrip("\n")
     new = (stripped + "\n") if uninstall else ((stripped + "\n\n" if stripped else "") + render_rule(t))
     if uninstall and new.strip() == stripped.strip() and BLOCK_RE.search(old) is None:
@@ -221,13 +221,13 @@ def plan(agent: str, t: Tutor, uninstall: bool, env: Mapping[str, str] = os.envi
         def write_rule(new=new):
             rule_file.parent.mkdir(parents=True, exist_ok=True)
             _backup(rule_file)
-            rule_file.write_text(new)
+            rule_file.write_text(new, encoding="utf-8")
         verb = "remove the block from" if uninstall else ("update the block in" if BLOCK_RE.search(old) else "add the block to")
         steps.append(Step("rule", f"{verb} {rule_file}", write_rule))
 
     # 2. skill
     dest = home / "skills" / "samvada"
-    src = resources.files("samvada").joinpath("agents", "skills", "samvada", "SKILL.md").read_text()
+    src = resources.files("samvada").joinpath("agents", "skills", "samvada", "SKILL.md").read_text(encoding="utf-8")
     ours = (dest / MARKER).exists()
     if dest.exists() and not ours:
         steps.append(Step("skill", f"{dest} exists and is not Samvada's: left alone"))
@@ -236,19 +236,19 @@ def plan(agent: str, t: Tutor, uninstall: bool, env: Mapping[str, str] = os.envi
             steps.append(Step("skill", f"remove {dest}", lambda: shutil.rmtree(dest)))
         else:
             steps.append(Step("skill", f"not installed in {dest}"))
-    elif ours and (dest / "SKILL.md").exists() and (dest / "SKILL.md").read_text() == src:
+    elif ours and (dest / "SKILL.md").exists() and (dest / "SKILL.md").read_text(encoding="utf-8") == src:
         steps.append(Step("skill", f"unchanged in {dest}"))
     else:
         def write_skill():
             dest.mkdir(parents=True, exist_ok=True)
-            (dest / "SKILL.md").write_text(src)
-            (dest / MARKER).write_text("installed by `samvada setup`; `samvada setup --uninstall` removes it\n")
+            (dest / "SKILL.md").write_text(src, encoding="utf-8")
+            (dest / MARKER).write_text("installed by `samvada setup`; `samvada setup --uninstall` removes it\n", encoding="utf-8")
         steps.append(Step("skill", f"{'update' if ours else 'install'} {dest / 'SKILL.md'}", write_skill))
 
     # 3. hooks (Claude Code)
     if agent == "claude":
         sfile = home / "settings.json"
-        text = sfile.read_text() if sfile.exists() else "{}"
+        text = sfile.read_text(encoding="utf-8") if sfile.exists() else "{}"
         try:
             settings = json.loads(text)
         except ValueError:
@@ -273,7 +273,7 @@ def plan(agent: str, t: Tutor, uninstall: bool, env: Mapping[str, str] = os.envi
                 def write_hooks(new_text=new_text):
                     sfile.parent.mkdir(parents=True, exist_ok=True)
                     _backup(sfile)
-                    sfile.write_text(new_text)
+                    sfile.write_text(new_text, encoding="utf-8")
                 verb = "remove the UserPromptSubmit and Stop hooks from" if uninstall else \
                     "set the UserPromptSubmit and Stop hooks in"
                 steps.append(Step("hooks", f"{verb} {sfile}", write_hooks))

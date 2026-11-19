@@ -616,12 +616,16 @@ def _voices(rest: list[str], voices: dict) -> int:
 
 
 def _safe_streams() -> None:
-    """Never die on our own output: a Windows console or pipe is often cp1252, which has no
-    "←" or Chinese. What it cannot show is replaced; the work goes on."""
+    """Never die on our own output: a Windows console or pipe is often cp1252 or cp936, which
+    have no "←" or emoji. A pipe (an agent, a hook, a log) gets UTF-8, whatever the locale; a
+    terminal keeps its own encoding. What a stream cannot show is replaced; the work goes on."""
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(errors="replace")
-        except (AttributeError, ValueError):
+            if stream.isatty():
+                stream.reconfigure(errors="replace")
+            else:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
             pass
 
 

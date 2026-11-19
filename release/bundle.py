@@ -108,9 +108,9 @@ def run(cmd: list, **kw) -> subprocess.CompletedProcess:
 
 
 def git_commit() -> str:
-    r = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     dirty = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "."],
-                           capture_output=True, text=True).stdout.strip()
+                           capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
     return (r.stdout.strip() or "unknown") + ("+dirty" if dirty else "")
 
 
@@ -183,9 +183,9 @@ def build(version: str, langs: list[str], out: Path, work: Path, cache: Path,
     (stage / "bin").mkdir()
     launcher = launcher_of(stage)
     if WINDOWS:
-        launcher.write_text(LAUNCHER_CMD.replace("\n", "\r\n"), newline="")
+        launcher.write_text(LAUNCHER_CMD.replace("\n", "\r\n"), newline="", encoding="utf-8")
     else:
-        launcher.write_text(LAUNCHER_SH)
+        launcher.write_text(LAUNCHER_SH, encoding="utf-8")
         launcher.chmod(0o755)
 
     env = {**os.environ, "SAMVADA_DOWNLOAD_CACHE": str(cache),
@@ -219,7 +219,7 @@ def build(version: str, langs: list[str], out: Path, work: Path, cache: Path,
         with tarfile.open(tmp, "w:gz", compresslevel=6) as tar:
             tar.add(stage, arcname=name)
     tmp.replace(archive)
-    (out / f"{archive.name}.sha256").write_text(f"{sha256(archive)}  {archive.name}\n")
+    (out / f"{archive.name}.sha256").write_text(f"{sha256(archive)}  {archive.name}\n", encoding="utf-8")
     print(f"bundle: {archive} ({archive.stat().st_size / 1e6:.0f} MB packed, "
           f"{info['size_bytes'] / 1e6:.0f} MB unpacked) in {time.time() - t0:.0f}s")
     return archive
@@ -291,7 +291,7 @@ def test(archive: Path, langs: list[str], work: Path, local: bool) -> int:
     seen = subprocess.run([str(python_exe(folder / "python")), "-c",
                            "import platform, sys, sysconfig; print(f'built for {sysconfig.get_platform()}, '"
                            "f'on a {platform.machine()} OS, Python {sys.version.split()[0]}')"],
-                          capture_output=True, text=True).stdout.strip()
+                          capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
     # platform.machine() is the OS's (Windows asks WMI); sysconfig is what python.exe was built for
     print(f"bundle test: the bundle's Python: {seen}")
     r1 = subprocess.run([str(launcher), "voices", "verify", *langs], env=env)

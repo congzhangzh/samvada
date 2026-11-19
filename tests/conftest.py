@@ -61,10 +61,10 @@ class Env:
         for name, body in (("piper", FAKE_PIPER), ("piper-plus", FAKE_PIPER),
                            ("edge-tts", FAKE_EDGE), ("paplay", FAKE_PLAY), ("gdbus", FAKE_GDBUS)):
             p = self.bin / name
-            p.write_text(body)
+            p.write_text(body, encoding="utf-8")
             p.chmod(0o755)
         for m in MODELS:
-            (self.voices / m).write_text("model")
+            (self.voices / m).write_text("model", encoding="utf-8")
         self.vars = {
             "PATH": f"{self.bin}:/usr/bin:/bin",
             "HOME": str(tmp),
@@ -79,6 +79,10 @@ class Env:
             "FAKE_IDLE_MS": "1000",
             "SAMVADA_WARM": "off",  # one process per clip, unless a test turns warm engines on
             "SAMVADA_WAIT": "1",  # speak waits until heard, so a test sees what was played
+            # every Samvada child of a test: a read or write that relies on the locale's
+            # encoding (cp936 on a Chinese Windows) is an error, not a hidden difference
+            "PYTHONWARNDEFAULTENCODING": "1",
+            "PYTHONWARNINGS": "error::EncodingWarning",
         }
 
     def run(self, *args: str, cmd: list[str] | None = None, input: str | None = None,
@@ -86,13 +90,13 @@ class Env:
         env = {**self.vars, **extra}
         base = cmd or [sys.executable, "-m", "samvada"]
         env.setdefault("PYTHONPATH", str(ROOT / "src"))
-        return subprocess.run(base + list(args), env=env, capture_output=True, text=True,
+        return subprocess.run(base + list(args), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                               input=input, stdin=None if input is not None else subprocess.DEVNULL)
 
     def lines(self) -> list[str]:
         if not self.log.exists():
             return []
-        out = self.log.read_text().splitlines()
+        out = self.log.read_text(encoding="utf-8").splitlines()
         self.log.unlink()
         return out
 

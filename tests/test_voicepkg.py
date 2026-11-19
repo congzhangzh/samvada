@@ -44,17 +44,17 @@ def test_layout_is_one_project_with_the_files_as_pinned(env, hub, tmp_path):
     d = install(env, hub, tmp_path, langs=("zh",))["zh"]
     entries = [e for e in hub.entries if e["pack"] == "zh"]
     assert d.name == "samvada-voice-zh"
-    main = tomllib.loads((d / "pyproject.toml").read_text())
+    main = tomllib.loads((d / "pyproject.toml").read_text(encoding="utf-8"))
     assert main["project"]["dependencies"] == []
     assert main["build-system"]["requires"] == [vp.HATCHLING]
     pkg = d / "src/samvada_voice_zh"
-    index = json.loads((pkg / "index.json").read_text())
+    index = json.loads((pkg / "index.json").read_text(encoding="utf-8"))
     assert index["format"] == voicepkg.FORMAT == 2
     assert [f["dest"] for f in index["files"]] == [e["dest"] for e in entries]
     for f, e in zip(index["files"], entries):
         assert f["path"] == f"data/{e['dest']}"
         assert (pkg / f["path"]).read_bytes() == blob(hub, e).read_bytes()
-    readme = (d / "README.md").read_text()
+    readme = (d / "README.md").read_text(encoding="utf-8")
     assert "non-commercial" in readme and index["digest"] in readme and "part" not in readme
 
 
@@ -126,7 +126,7 @@ def test_every_voice_names_its_terms():
 
 
 def test_the_version_is_one_for_all_voice_packages():
-    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     v = pyproject["tool"]["samvada"]["voice-packages"]
     assert v == vp.version()
     pins = pyproject["project"]["dependencies"] + [
@@ -142,7 +142,7 @@ def test_pypi_plan_uploads_what_is_new_and_stops_on_a_changed_version(tmp_path):
     names = ["samvada_voice_en-1.0-py3-none-any.whl", "samvada_voice_zh-1.0-py3-none-any.whl"]
     for n in names:
         (dest / n).write_bytes(n.encode())
-    (dest / "SHA256SUMS").write_text("".join(f"{vp.sha256(dest / n)}  {n}\n" for n in names))
+    (dest / "SHA256SUMS").write_text("".join(f"{vp.sha256(dest / n)}  {n}\n" for n in names), encoding="utf-8")
     asked = []
 
     def pypi(theirs):
@@ -168,8 +168,8 @@ def test_a_build_of_another_format_is_never_reused(tmp_path):
     dest.mkdir(parents=True)
     w = dest / "samvada_voice_en-1.0-py3-none-any.whl"
     w.write_bytes(b"old")
-    (dest / "SHA256SUMS").write_text(f"{vp.sha256(w)}  {w.name}\n")
-    (dest / "voice-packages.json").write_text('{"version": "1.0", "langs": []}\n')
+    (dest / "SHA256SUMS").write_text(f"{vp.sha256(w)}  {w.name}\n", encoding="utf-8")
+    (dest / "voice-packages.json").write_text('{"version": "1.0", "langs": []}\n', encoding="utf-8")
 
     class A:
         out, work = tmp_path / "out", None
@@ -200,7 +200,7 @@ def release(env, hub, tmp_path, lang="en", *, sha=None, digest=None) -> str:
     pins.write_text(f'version = "1.0"\nurl = "{CLOSED}/nowhere/"\n[wheels.{lang}]\n'
                     f'file = "{name}"\nsize = {len(data)}\n'
                     f'sha256 = "{sha or hashlib.sha256(data).hexdigest()}"\n'
-                    f'digest = "{digest or voicepkg.digest(files)}"\n')
+                    f'digest = "{digest or voicepkg.digest(files)}"\n', encoding="utf-8")
     env.vars |= {"SAMVADA_VOICE_PINS": str(pins), "SAMVADA_VOICES_URL": f"{hub.endpoint}/gh/voices-1.0/"}
     return f"/gh/voices-1.0/{name}"
 
@@ -270,7 +270,7 @@ def test_packages_off_also_skips_the_release(env, hub, tmp_path):
 def test_the_shipped_pins_name_every_voice_of_this_voices_lock():
     """voice-packages.toml pins all four wheels of the voice-packages version, each made from
     the pack voices.lock pins now: a voices.lock change without new wheels fails here."""
-    pins = tomllib.loads((ROOT / "src/samvada/voice-packages.toml").read_text())
+    pins = tomllib.loads((ROOT / "src/samvada/voice-packages.toml").read_text(encoding="utf-8"))
     lock = packs.load_lock(ROOT / "src/samvada/voices.lock")
     assert pins["version"] == vp.version()
     assert pins["url"] == vp.release_url(vp.version())
@@ -287,7 +287,7 @@ def test_the_kokoro_packs_are_github_only(tmp_path):
     assert vp.voice_of("zh-kokoro", VOICES)["engine"] == "kokoro"
     d = tmp_path / "built"
     d.mkdir()
-    (d / "SHA256SUMS").write_text("ab  samvada_voice_en_kokoro-1.0-py3-none-any.whl\n")
+    (d / "SHA256SUMS").write_text("ab  samvada_voice_en_kokoro-1.0-py3-none-any.whl\n", encoding="utf-8")
     asked = []
     assert vp.pypi_plan(d, tmp_path / "up", ask=lambda p, v: asked.append(p)) == []
     assert asked == []

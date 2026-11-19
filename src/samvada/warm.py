@@ -172,7 +172,7 @@ def _start(cmd: list[str], env: Mapping[str, str], d: Path, name: str) -> bool:
         proc = None
         if not _held(pidf):                     # no server, not even one still loading
             with open(d / f"{name}.log", "ab") as out:
-                proc = subprocess.Popen(cmd, env=dict(env), stdin=subprocess.DEVNULL,
+                proc = subprocess.Popen(cmd, env={**env, "PYTHONUTF8": "1"}, stdin=subprocess.DEVNULL,
                                         stdout=out, stderr=out, start_new_session=True,
                                         close_fds=True)
         end = time.time() + float(env.get("SAMVADA_WARM_START_WAIT", START_WAIT))
@@ -224,7 +224,7 @@ def speak(engine: str, base: list[str], extra_env: Mapping[str, str], env: Mappi
 
 def _pid_of(pidf: Path) -> int | None:
     try:
-        pid = int(pidf.read_text().split()[0])
+        pid = int(pidf.read_text(encoding="utf-8").split()[0])
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes() if Path("/proc").is_dir() else b""
     except (OSError, ValueError, IndexError):
         return None
@@ -273,7 +273,7 @@ def stop_all(env: Mapping[str, str] = os.environ) -> int:
 def _rss_mb() -> float:
     """This process's memory now (Linux: /proc/self/statm), else its peak."""
     try:
-        pages = int(Path("/proc/self/statm").read_text().split()[1])
+        pages = int(Path("/proc/self/statm").read_text(encoding="utf-8").split()[1])
         return pages * os.sysconf("SC_PAGE_SIZE") / 2**20
     except (OSError, ValueError, IndexError):
         import resource

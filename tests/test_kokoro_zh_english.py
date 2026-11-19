@@ -30,7 +30,7 @@ class Kokoro:
     def __init__(self, model, voices, vocab_config=None):
         self.model, self.cfg, self.tokenizer = os.path.basename(model), vocab_config, _Tok()
     def create(self, text, voice, speed=1.0, lang="en-us", is_phonemes=False):
-        with open(os.environ["FAKE_LOG"], "a") as f:
+        with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as f:
             f.write(f"kokoro {self.model} {voice} {text}\\n")
         class A(list):
             def clip(self, a, b): return self
@@ -58,7 +58,7 @@ FAKE_PHONEMIZER = '''
 import os
 class EspeakBackend:
     def __init__(self, lang, preserve_punctuation=False, with_stress=False):
-        with open(os.environ.get("FAKE_LOG", os.devnull), "a") as f:
+        with open(os.environ.get("FAKE_LOG", os.devnull), "a", encoding="utf-8") as f:
             f.write(f"espeak {lang}\\n")
     def phonemize(self, texts):
         return [t.lower() + "ɚˈ " for t in texts]
