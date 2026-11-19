@@ -54,7 +54,8 @@ def run(state: State, env: Mapping[str, str] = os.environ, out=print) -> int:
         home = engines.voice_home(v, dirs)
         if home is None:
             problems.append(f"model not found in {', '.join(map(str, dirs))}"
-                            f" (samvada voices add {lang}, or `voices pick {lang}`)")
+                            f" (samvada voices add {lang}, or `voices pick {lang}`; can't download: "
+                            f"samvada voices add {lang} --urls, then --from <folder>)")
         elif v.engine == "piper" and not Path(f"{home / v.model}.json").is_file():
             problems.append(f"{v.model}.json is missing beside the model")
         elif v.engine == "voicevox":

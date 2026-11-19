@@ -68,6 +68,14 @@ lock before putting it in place, wherever it came from (`SAMVADA_VOICE_PACKAGES=
 packages, installed or on GitHub). Nothing needs configuring; optionally
 `HF_ENDPOINT` points at a mirror and `HF_TOKEN` lifts anonymous rate limits.
 
+**Can't download, or want to fetch the files yourself?** `samvada voices add en zh --urls` (or
+`SAMVADA_DOWNLOAD=urls samvada voices add en zh`) downloads nothing and prints, for each pack, the
+wheel on the GitHub release and, as the other choice, each file at its pinned URL, with its size
+and sha256, and how to install a missing engine. Put what you downloaded in one folder, any file
+names, and run `samvada voices add en zh --from <folder>`: each file is found by its size, then its
+sha256, and checked against the lock again; nothing goes to the network. A pack with a file
+missing installs nothing and lists that file's URLs.
+
 | Pack | Voice | Engine | Source |
 |---|---|---|---|
 | en | `en_US-lessac-high` | Piper | `rhasspy/piper-voices` |

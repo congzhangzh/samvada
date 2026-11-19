@@ -27,10 +27,12 @@ usage: samvada speak [--wait] [--save DIR] <lang> "<text>" [<lang> "<text>" ...]
        samvada [--session] online [off|fallback|always]     default off: local voices only
        samvada presence [phone]        phone: the owner just wrote from the phone
        samvada voices [list]           the voice packs: installed where, size, engine
-       samvada voices add <lang>... [--kokoro] [--engine auto|always|never]
+       samvada voices add <lang>... [--kokoro] [--engine auto|always|never] [--urls | --from DIR]
                                        verify and install, from its samvada-voice-<lang>
                                        package when installed, else downloaded once;
-                                       --kokoro: the Kokoro fallback for en, zh (full models)
+                                       --kokoro: the Kokoro fallback for en, zh (full models);
+                                       --urls: download nothing, print where each file is;
+                                       --from DIR: install what you downloaded, no network
        samvada voices verify [<lang>...] | remove <lang>...
        samvada voices pick [<lang>...] [--dir DIR]... [--plain | --table]
                                        listen to each voice file of a language and choose one
@@ -68,7 +70,40 @@ env        SAMVADA=on|off  force playing or silence for one call
            SAMVADA_PROFILE=<name>  the profile for one call; SAMVADA_WARM=off  no warm engines;
            SAMVADA_WARM_IDLE=<s>  how long a warm engine waits for a sentence (600)
            HF_ENDPOINT, HF_TOKEN  a Hugging Face mirror; a token against rate limits (optional)
-exit       0 played, or silent by decision; 1 a language failed; 2 bad usage"""
+           SAMVADA_DOWNLOAD=urls  voices add prints the URLs and downloads nothing (auto: download)
+exit       0 played, or silent by decision; 1 a language failed; 2 bad usage
+
+""" + "{hint}"
+
+
+HINT = """\
+Can't download, or want to fetch the files yourself?
+  samvada voices add en zh --urls        where each file is (GitHub, Hugging Face), with its
+                                         size and sha256; nothing is downloaded
+                                         (or SAMVADA_DOWNLOAD=urls samvada voices add en zh)
+  samvada voices add en zh --from DIR    install from DIR, any file names, no network"""
+USAGE = USAGE.replace("{hint}", HINT)
+
+VOICES_USAGE = """\
+usage: samvada voices [list]
+       samvada voices add <lang>... [--kokoro] [--engine auto|always|never] [--urls | --from DIR]
+       samvada voices verify [<lang>...] | remove <lang>...
+       samvada voices pick [<lang>...] [--dir DIR]... [--plain | --table]
+
+add     downloads each language's voice pack once (samvada's GitHub release, else Hugging
+        Face file by file), checks every file's size and sha256, installs its engine (auto:
+        when missing; never; always)
+--kokoro  the Kokoro fallback packs for en, zh
+--urls  download nothing: print each file's URLs, size and sha256 (SAMVADA_DOWNLOAD=urls too)
+--from  install from a folder of downloaded files, matched by size and sha256, no network
+
+""" + HINT
+
+
+def download_hint(langs: list[str], kokoro: bool) -> str:
+    what = " ".join(langs) + (" --kokoro" if kokoro else "")
+    return (f"can't download? samvada voices add {what} --urls shows where to get the files; "
+            f"then samvada voices add {what} --from <folder>")
 
 
 class Usage(Exception):
@@ -408,6 +443,30 @@ def lock_packs(lock) -> list[str]:
     return sorted({f.pack for f in lock.files})
 
 
+def _voices_urls(args: list[str], lock, home: Path, engine_mode: str, engine_of, again: str) -> int:
+    """The URL mode: what to download by hand, and how to install it; nothing is downloaded."""
+    print("samvada: the URL mode, nothing is downloaded. Put these files in one folder "
+          "(any names; one of each pack's choices is enough):")
+    todo_engines = []
+    for lang in args:
+        try:
+            for line in packs.urls(lang, lock, home, os.environ):
+                print(line)
+        except packs.PackError as e:
+            say(f"{lang}: {e}")
+            return 1
+        engine = engine_of(lang)
+        if engine_mode != "never" and engines.engine_where(engine) == "missing" \
+                and engine not in todo_engines:
+            todo_engines.append(engine)
+    print("then install them, with no network:")
+    print(f"  {again} --from <folder>")
+    for engine in todo_engines:
+        for line in packs.engine_lines(engine, again):
+            print(line)
+    return 0
+
+
 def _voices(rest: list[str], voices: dict) -> int:
     lock = packs.load_lock()
     home = paths.install_voices_dir()
@@ -415,7 +474,25 @@ def _voices(rest: list[str], voices: dict) -> int:
     if sub == "pick":
         from . import pick
         return pick.main(args, voices)
+    if sub in ("-h", "--help", "help"):
+        print(VOICES_USAGE)
+        return 0
     engine_mode = "auto"
+    mode = os.environ.get("SAMVADA_DOWNLOAD", "").lower() or "auto"
+    if sub == "add" and mode not in ("auto", "urls"):  # only add downloads
+        raise Usage(f"SAMVADA_DOWNLOAD={mode}: one of auto, urls")
+    if "--urls" in args:
+        args = [a for a in args if a != "--urls"]
+        mode = "urls"
+    source = None
+    if "--from" in args:
+        i = args.index("--from")
+        if i + 1 >= len(args):
+            raise Usage("--from <folder>")
+        source = Path(args[i + 1]).expanduser()
+        del args[i:i + 2]
+    if source is not None and mode == "urls":
+        raise Usage("--urls prints what --from installs: one or the other")
     kokoro = "--kokoro" in args
     if kokoro:
         args = [a for a in args if a != "--kokoro"]
@@ -453,28 +530,71 @@ def _voices(rest: list[str], voices: dict) -> int:
         print(f"install folder: {home}")
         return 0
     if sub == "add" and args:
+        asked = list(args)  # as typed, for the lines that say what to run next
         if kokoro:  # en zh --kokoro: the Kokoro packs (and the engine), not Piper's
             missing = [l for l in args if not lock.pack(f"{l.split('-')[0]}-kokoro")]
             if missing:
                 raise Usage(f"no Kokoro pack for {' '.join(missing)} (Kokoro packs: "
                             f"{' '.join(p for p in lock_packs(lock) if p.endswith('-kokoro'))})")
             args = [f"{l.split('-')[0]}-kokoro" for l in args]
+        typed = dict(zip(args, asked))
+        again = f"samvada voices add {' '.join(asked)}" + (" --kokoro" if kokoro else "")
+
+        def engine_of(lang: str) -> str:
+            return "kokoro" if lang.endswith("-kokoro") else voices[lang].engine
+
+        if mode == "urls":
+            return _voices_urls(args, lock, home, engine_mode, engine_of, again)
         total = sum(lock.size(l) for l in args)
-        print(f"samvada: installing {' '.join(args)} into {home} (up to {packs.mb(total)})")
-        status = 0
+        dl = None
+        if source is not None:
+            try:
+                dl = packs.Downloads(source)
+            except packs.PackError as e:
+                say(str(e))
+                return 1
+            print(f"samvada: installing {' '.join(args)} into {home} from {source}, no network")
+        else:
+            print(f"samvada: installing {' '.join(args)} into {home} (up to {packs.mb(total)})")
+        status, failed, later = 0, [], []
         for lang in args:
             try:
-                got = packs.add(lang, lock, home, os.environ)
+                if dl is not None:
+                    got = packs.add_from(lang, lock, home, dl, os.environ)
+                else:
+                    got = packs.add(lang, lock, home, os.environ)
                 print(f"{lang}: {'installed' if got else 'already installed'}, verified")
-                engine = "kokoro" if lang.endswith("-kokoro") else voices[lang].engine
+                engine = engine_of(lang)
                 where_ = engines.engine_where(engine)
-                if where_ != "samvada" and (engine_mode == "always"
-                                            or (engine_mode == "auto" and where_ == "missing")):
+                if dl is not None and where_ == "missing" and engine_mode == "auto":
+                    if engine not in later:  # --from never reaches the network by itself
+                        later.append(engine)
+                elif where_ != "samvada" and (engine_mode == "always"
+                                              or (engine_mode == "auto" and where_ == "missing")):
                     packs.install_engine(engine, paths.engines_dir())
                     print(f"{lang}: engine {engine} installed in {paths.engines_dir() / engine}")
+            except packs.Missing as e:
+                say(f"{lang}: {len(e.files)} file(s) not in {source}; nothing installed for {lang}. "
+                    f"Download them, into that folder:")
+                for line in packs.url_lines(lang, lock, e.files, os.environ):
+                    print(line)
+                status = 1
+            except packs.DownloadError as e:
+                say(f"{lang}: {e}")
+                failed.append(typed[lang])
+                status = 1
             except packs.PackError as e:
                 say(f"{lang}: {e}")
                 status = 1
+        if dl is not None:
+            for p in dl.wrong():
+                say(f"ignored {p.name}: its size is a pinned file's, its sha256 is not "
+                    "(another version, or a broken download)")
+            for engine in later:
+                for line in packs.engine_lines(engine, again):
+                    print(line)
+        if failed:
+            say(download_hint(failed, kokoro))
         return status
     if sub == "verify":
         status = 0
@@ -492,8 +612,7 @@ def _voices(rest: list[str], voices: dict) -> int:
             packs.remove(lang, lock, home)
             print(f"{lang}: removed from {home}")
         return 0
-    raise Usage("usage: samvada voices [list | add <lang>... | verify [<lang>...] | remove <lang>... "
-                "| pick [<lang>...] [--dir DIR]...]")
+    raise Usage(VOICES_USAGE)
 
 
 def _safe_streams() -> None:

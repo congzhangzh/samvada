@@ -6,7 +6,8 @@ language's voice package wheel on samvada's GitHub release (pinned in voice-pack
 else from the Hugging Face Hub at a pinned commit (or a URL at a commit), file by file. Each is
 checked against its size and sha256 before it is put in place, wherever it came from. No
 dependency: plain HTTP, which honours HF_ENDPOINT (a mirror) and HF_TOKEN (rate limits) for the
-Hub, SAMVADA_VOICES_URL for the GitHub release.
+Hub, SAMVADA_VOICES_URL for the GitHub release. By hand: the URL mode prints where each file
+comes from and downloads nothing; `--from` installs from a folder of downloaded files.
 """
 
 from __future__ import annotations
@@ -85,6 +86,10 @@ class PackError(Exception):
     pass
 
 
+class DownloadError(PackError):
+    """A download failed or came wrong: the network, not the pack (the hint names --urls)."""
+
+
 def mb(n: int) -> str:
     return f"{n / 1e6:.0f} MB"
 
@@ -152,10 +157,10 @@ def fetch(f: File, out: Path, env: Mapping[str, str], log=print,
     try:
         _download(f.source_url(env), part, f.size, headers, log, f"{f.pack}: {f.dest} ({mb(f.size)})")
     except PackError as e:
-        raise PackError(f"{f.dest}: download failed: {e.__cause__}") from e
+        raise DownloadError(f"{f.dest}: download failed: {e.__cause__}") from e
     if part.stat().st_size != f.size or _sha256(part) != f.sha256:
         part.unlink()
-        raise PackError(f"{f.dest}: size or sha256 does not match voices.lock; removed, try again")
+        raise DownloadError(f"{f.dest}: size or sha256 does not match voices.lock; removed, try again")
     part.replace(out)
     if cache:
         cache.mkdir(parents=True, exist_ok=True)
@@ -228,6 +233,26 @@ def add(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log=print,
     home.mkdir(parents=True, exist_ok=True)
     marks = _marks(home)
     done = marks.get(lang, {})
+    todo = _todo(files, home, done)
+    wheel = None
+    if todo and not offline and from_package(lang, lock, env) is None:
+        wheel = release_wheel(lang, lock, home, env, log, need=sum(f.size for f in todo))
+    try:
+        fetched = _put(lang, todo, home, lambda f, out: fetch(f, out, env, log, pkg=wheel),
+                       marks, done)
+    finally:
+        if wheel:
+            wheel.close()
+            if not env.get("SAMVADA_DOWNLOAD_CACHE"):
+                wheel.folder.unlink(missing_ok=True)
+    _hf_refs(home, files)
+    marks[lang] = done
+    _save_marks(home, marks)
+    return fetched
+
+
+def _todo(files: list[File], home: Path, done: dict) -> list[File]:
+    """The files of a pack not yet in `home` as pinned (a file found whole is noted in `done`)."""
     todo = []
     for f in files:
         target = home / f.dest
@@ -238,20 +263,7 @@ def add(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log=print,
             done[f.dest] = f.sha256
             continue
         todo.append(f)
-    wheel = None
-    if todo and not offline and from_package(lang, lock, env) is None:
-        wheel = release_wheel(lang, lock, home, env, log, need=sum(f.size for f in todo))
-    try:
-        fetched = _put(lang, todo, home, env, log, wheel, marks, done)
-    finally:
-        if wheel:
-            wheel.close()
-            if not env.get("SAMVADA_DOWNLOAD_CACHE"):
-                wheel.folder.unlink(missing_ok=True)
-    _hf_refs(home, files)
-    marks[lang] = done
-    _save_marks(home, marks)
-    return fetched
+    return todo
 
 
 def release_wheel(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log=print,
@@ -283,13 +295,13 @@ def release_wheel(lang: str, lock: Lock, home: Path, env: Mapping[str, str], log
     return wheel
 
 
-def _put(lang: str, todo: list[File], home: Path, env: Mapping[str, str], log,
-         wheel: voicepkg.Wheel | None, marks: dict, done: dict) -> int:
+def _put(lang: str, todo: list[File], home: Path, get, marks: dict, done: dict) -> int:
+    """Put each file in place; `get(f, out)` writes it to `out`, verified against voices.lock."""
     fetched = 0
     for f in todo:
         target = home / f.dest
         tmp = home / f".{Path(f.dest).name}.{f.sha256[:12]}.download"
-        fetch(f, tmp, env, log, pkg=wheel)
+        get(f, tmp)
         fetched += f.size
         if f.unpack:
             _unpack(tmp, f.unpack, target)
@@ -300,6 +312,148 @@ def _put(lang: str, todo: list[File], home: Path, env: Mapping[str, str], log,
         done[f.dest] = f.sha256
         marks[lang] = done
         _save_marks(home, marks)
+    return fetched
+
+
+# -- by hand: the URL mode and --from (DESIGN 8.4) -------------------------------------------
+def _size(n: int) -> str:
+    return f"{mb(n)} ({n} bytes)" if n >= 1_000_000 else f"{n} bytes"
+
+
+def url_lines(lang: str, lock: Lock, todo: list[File], env: Mapping[str, str]) -> list[str]:
+    """Where to download a pack's missing files by hand: its wheel on samvada's GitHub release
+    (one file: the first choice), else each file from where it is published (the Hub at its
+    pinned commit, or its URL). Each with its size and sha256, to check what came."""
+    files = lock.pack(lang)
+    out = [f"{lang} ({len(todo)} of {len(files)} files, {mb(sum(f.size for f in todo))}):"]
+    w = voicepkg.release_wheel(lang, files, env)
+    if w:
+        out += ["  either its voice package, one file from samvada's GitHub release:",
+                f"    {w['url']}", f"      {_size(w['size'])}  sha256 {w['sha256']}",
+                "  or each file from where it is published:"]
+    else:
+        out.append("  each file from where it is published:")
+    for f in todo:
+        out += [f"    {f.source_url(env)}",
+                f"      {_size(f.size)}  sha256 {f.sha256}  (installed as {f.dest})"]
+    return out
+
+
+def urls(lang: str, lock: Lock, home: Path, env: Mapping[str, str]) -> list[str]:
+    """The URL mode for one pack: what to download by hand; nothing is downloaded."""
+    files = lock.pack(lang)
+    if not files:
+        raise PackError(f"no voice pack for {lang} in voices.lock")
+    todo = _todo(files, home, dict(_marks(home).get(lang, {})))
+    if not todo:
+        return [f"{lang}: already installed in {home}, nothing to download"]
+    if from_package(lang, lock, env) is not None:
+        return [f"{lang}: in the installed {voicepkg.project(lang)} package, nothing to download "
+                f"(samvada voices add {lang})"]
+    return url_lines(lang, lock, todo, env)
+
+
+def engine_lines(engine: str, again: str) -> list[str]:
+    """How to install a missing engine: its pinned requirements, from PyPI."""
+    reqs = resources.files("samvada").joinpath("locks", f"{engine}.txt")
+    try:
+        pins = [l for l in reqs.read_text().splitlines() if l and not l[0].isspace() and l[0] != "#"]
+    except OSError:
+        pins = []
+    return [f"engine {engine}: not installed; it comes from PyPI, {len(pins)} pinned packages "
+            f"({reqs}):", f"  {again} --engine always"]
+
+
+class Missing(PackError):
+    """Files of a pack that the folder does not hold."""
+
+    def __init__(self, lang: str, files: list[File]):
+        super().__init__(f"{len(files)} file(s) missing")
+        self.lang, self.files = lang, files
+
+
+class Downloads:
+    """A folder of files downloaded by hand, whatever their names: a file is found by its
+    size, then its sha256; a file is hashed only when its size is one we look for, and once."""
+
+    def __init__(self, folder: Path):
+        if not folder.is_dir():
+            raise PackError(f"--from {folder}: no such folder")
+        self.folder = folder
+        self.by_size: dict[int, list[Path]] = {}
+        for p in sorted(folder.iterdir()):
+            if p.name.endswith(".part") or not p.is_file():
+                continue
+            try:
+                self.by_size.setdefault(p.stat().st_size, []).append(p)
+            except OSError:
+                continue
+        self.sha: dict[Path, str] = {}
+        self.used: set[Path] = set()
+
+    def find(self, size: int, sha256: str) -> Path | None:
+        for p in self.by_size.get(size, []):
+            if p not in self.sha:
+                self.sha[p] = _sha256(p)
+            if self.sha[p] == sha256:
+                self.used.add(p)
+                return p
+        return None
+
+    def wrong(self) -> list[Path]:
+        """Files of a size we looked for whose sha256 matched nothing: not what was pinned."""
+        return [p for p in self.sha if p not in self.used]
+
+
+def add_from(lang: str, lock: Lock, home: Path, dl: Downloads, env: Mapping[str, str],
+             log=print) -> int:
+    """Install one pack from a folder of downloaded files, with no network: the pack's wheel
+    from the GitHub release and/or its files, mixed. Nothing is installed unless the folder
+    holds everything missing (else Missing). Every file is checked against voices.lock."""
+    files = lock.pack(lang)
+    if not files:
+        raise PackError(f"no voice pack for {lang} in voices.lock")
+    home.mkdir(parents=True, exist_ok=True)
+    marks = _marks(home)
+    done = marks.get(lang, {})
+    todo = _todo(files, home, done)
+    wheel = None
+    w = voicepkg.release_wheel(lang, files, env) if todo else None
+    if w and (p := dl.find(w["size"], w["sha256"])):
+        wheel = voicepkg.open_wheel(p, lang)
+        if wheel is None:
+            log(f"  {lang}: {p.name} matches its pin but is not a voice package of this format")
+    try:
+        gaps = set(wheel.missing()) if wheel else set()
+        loose: dict[str, Path] = {}
+        missing = []
+        for f in todo:
+            p = dl.find(f.size, f.sha256)
+            if p:
+                loose[f.sha256] = p
+            elif not (wheel and wheel.has(f.sha256) and f.dest not in gaps):
+                missing.append(f)
+        if missing:
+            raise Missing(lang, missing)
+
+        def get(f: File, out: Path) -> None:
+            src = loose.get(f.sha256)
+            if src is not None:
+                shutil.copyfile(src, out)  # copied: the downloaded file stays where it is
+            else:
+                wheel.extract(f.sha256, out)
+            label = src.name if src is not None else wheel.folder.name
+            if out.stat().st_size != f.size or _sha256(out) != f.sha256:
+                out.unlink()
+                raise PackError(f"{f.dest}: {label} does not match voices.lock")
+            log(f"  {lang}: {f.dest} ({mb(f.size)}) ← {label}")
+        fetched = _put(lang, todo, home, get, marks, done)
+    finally:
+        if wheel:
+            wheel.close()
+    _hf_refs(home, files)
+    marks[lang] = done
+    _save_marks(home, marks)
     return fetched
 
 
