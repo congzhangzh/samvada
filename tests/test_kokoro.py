@@ -151,3 +151,19 @@ def test_doctor_checks_kokoro(env):
     own(env, f'[zh]\nengine = "kokoro"\nmodel = "{m}"\nstyle = "zf_001"\n')
     r = env.run("doctor")
     assert r.returncode == 0, r.stdout
+
+
+def test_onnx_runtime_threads_sleep_instead_of_spinning():
+    """Spinning workers cost 40 % more CPU on a quiet machine, 2.8× under load; same samples."""
+    from samvada import kokoro
+
+    class Opts:
+        def __init__(self): self.entries = {}
+        def add_session_config_entry(self, k, v): self.entries[k] = v
+
+    class RT:
+        SessionOptions = Opts
+
+    o = kokoro.session_options(RT)
+    assert o.enable_cpu_mem_arena is False
+    assert o.entries == {"session.intra_op.allow_spinning": "0", "session.inter_op.allow_spinning": "0"}

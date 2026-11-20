@@ -57,6 +57,23 @@ GRADES_V10 = {
 }
 
 
+def session_options(rt):
+    """ONNX Runtime's options for Kokoro.
+
+    - The CPU arena keeps buffers sized for the longest sentence: off.
+    - Spinning off: by default each of ONNX Runtime's worker threads (one per core but one)
+      busy-waits for the next operator instead of sleeping, and Kokoro runs thousands of small
+      operators a sentence. Measured on 8 vCPUs, a 9.3 s clip: quiet machine, 11.5 s of CPU
+      with spinning and 6.9 s without, the same 1.7 s wall; under load (≈8), 21 s and 4.8 s
+      wall with it, 7.6 s and 2.6 s without. The samples are bit-identical either way.
+    """
+    opts = rt.SessionOptions()
+    opts.enable_cpu_mem_arena = False
+    opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    opts.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    return opts
+
+
 @dataclass
 class KVoice:
     name: str
@@ -193,10 +210,9 @@ class Engine:
         cfg = self.model.with_name("config.json")  # v1.1 models need theirs; v1.0 never takes one
         vocab = str(cfg) if "v1.1" in self.model.name and cfg.is_file() else None
         self.k = None
-        try:  # ONNX Runtime's CPU arena keeps buffers sized for the longest sentence: off
+        try:
             import onnxruntime as rt
-            opts = rt.SessionOptions()
-            opts.enable_cpu_mem_arena = False
+            opts = session_options(rt)
             sess = rt.InferenceSession(str(self.model), sess_options=opts,
                                        providers=["CPUExecutionProvider"])
             self.k = Kokoro.from_session(sess, str(vf), vocab_config=vocab)
