@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
+
+
+def bundle_root() -> Path | None:
+    """The standalone bundle this Python belongs to (DESIGN 8.2): its folder holds BUNDLE.json
+    beside python/. Its voices and engines are then the bundle's, launcher or not: an agent's
+    hook runs the bundle's python directly, without bin/samvada and the folders it sets."""
+    root = Path(sys.prefix).resolve().parent
+    return root if (root / "BUNDLE.json").is_file() else None
 
 
 def _xdg(env: Mapping[str, str], var: str, default: str) -> Path:
@@ -61,20 +70,27 @@ def data_dir(env: Mapping[str, str] = os.environ) -> Path:
 
 
 def install_voices_dir(env: Mapping[str, str] = os.environ) -> Path:
-    """Where `samvada voices add` installs: $SAMVADA_VOICES, else Samvada's data folder."""
-    return Path(env["SAMVADA_VOICES"]) if env.get("SAMVADA_VOICES") else data_dir(env) / "voices"
+    """Where `samvada voices add` installs: $SAMVADA_VOICES, else the bundle's, else Samvada's
+    data folder."""
+    if env.get("SAMVADA_VOICES"):
+        return Path(env["SAMVADA_VOICES"])
+    bundle = bundle_root()
+    return bundle / "voices" if bundle else data_dir(env) / "voices"
 
 
 def voices_dirs(env: Mapping[str, str] = os.environ) -> list[Path]:
     """Where a language's model is looked for, in order; the first folder that has it wins.
 
-    $SAMVADA_VOICES alone when set (a bundle sets it). Else Samvada's own folder, then
+    $SAMVADA_VOICES alone when set (a bundle's launcher sets it); a bundle's own folder alone
+    when this Python is a bundle's. Else Samvada's own folder, then
     $PIPER_DIR or the folder the `speak` wrapper used, so voices installed by hand keep working.
     The engine runs with that folder as its cwd: Piper's Chinese phonemizer loads g2pW from
     its cwd, and would otherwise download a 113 MB copy into the caller's folder.
     """
     if env.get("SAMVADA_VOICES"):
         return [Path(env["SAMVADA_VOICES"])]
+    if (bundle := bundle_root()) is not None:  # as the launcher sets it
+        return [bundle / "voices"]
     legacy = Path(env["PIPER_DIR"]) if env.get("PIPER_DIR") else \
         _xdg(env, "XDG_DATA_HOME", ".local/share") / "piper"
     return [data_dir(env) / "voices", legacy]
@@ -86,5 +102,9 @@ def cache_dir(env: Mapping[str, str] = os.environ) -> Path:
 
 
 def engines_dir(env: Mapping[str, str] = os.environ) -> Path:
-    """Engine folders made by `samvada voices add`: $SAMVADA_ENGINES (a bundle sets it)."""
-    return Path(env["SAMVADA_ENGINES"]) if env.get("SAMVADA_ENGINES") else data_dir(env) / "engines"
+    """Engine folders made by `samvada voices add`: $SAMVADA_ENGINES (a bundle's launcher sets
+    it), else the bundle's, else Samvada's data folder."""
+    if env.get("SAMVADA_ENGINES"):
+        return Path(env["SAMVADA_ENGINES"])
+    bundle = bundle_root()
+    return bundle / "engines" if bundle else data_dir(env) / "engines"

@@ -59,6 +59,8 @@ samvada setup --call "Alex"         # what the agent calls you (setup asks once;
 samvada setup --table --ipa         # for a learner: also each message in every language, IPA row
 samvada setup --speak-alias         # also answer to `speak en "Hello"` (opt-in: the name is
                                     #   espeak's on some systems; another `speak` is left alone)
+bin/samvada setup                   # from a standalone bundle: also puts it on PATH (Windows:
+                                    #   the user PATH; else a link in ~/.local/bin); --no-path: not
 ```
 
 Exit codes: `0` played, or silent by decision; `1` a language failed; `2` bad usage.

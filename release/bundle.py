@@ -14,8 +14,11 @@ It works with no network at all:
 unpack it anywhere and run bin/samvada (bin\\samvada.cmd on Windows). Layout of
 samvada-<version>-<os>-<arch>/:
 
-    bin/samvada[.cmd] the launcher: sets the folders below, runs python -m samvada
-    python/           a standalone CPython (python-build-standalone, through uv)
+    bin/samvada[.cmd] the launcher: sets the folders below, runs python -m samvada (Windows:
+                      samvada.cmd, and samvada for Git Bash)
+    python/           a standalone CPython (python-build-standalone, through uv); a .pth file in
+                      its site-packages points to lib/, so an agent's hook can run python -m
+                      samvada without the launcher (samvada then finds the folders by BUNDLE.json)
     lib/              samvada itself, from the wheel
     engines/<name>/   each engine's pinned requirements (separate: both install `piper`)
     voices/           the voice packs, verified against voices.lock
@@ -62,6 +65,14 @@ export SAMVADA_VOICES="${SAMVADA_VOICES:-$here/voices}"
 export SAMVADA_ENGINES="${SAMVADA_ENGINES:-$here/engines}"
 export PYTHONPATH="$here/lib${PYTHONPATH:+:$PYTHONPATH}"
 exec "$here/python/bin/python3" -s -m samvada "$@"
+"""
+
+# Windows: the same for Git Bash, where Claude Code runs its commands (it finds samvada.exe or
+# samvada by name, never samvada.cmd). The folders come from the bundle itself (paths.bundle_root).
+LAUNCHER_SH_WINDOWS = """#!/bin/sh
+# Samvada standalone bundle, for Git Bash: everything it needs is in this folder; no network needed.
+here=$(cd "$(dirname "$0")/.." && pwd)
+PYTHONUTF8=1 exec "$here/python/python.exe" -s -m samvada "$@"
 """
 
 LAUNCHER_CMD = """@echo off
@@ -181,9 +192,17 @@ def build(version: str, langs: list[str], out: Path, work: Path, cache: Path,
     run(["uv", "pip", "install", "--quiet", "--python", py, "--target", stage / "lib",
          "--no-deps", wheel])
     (stage / "bin").mkdir()
+    # lib/ on this Python's own path, relative, so the bundle can still be moved
+    purelib = Path(subprocess.run([py, "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                  check=True).stdout.strip())
+    purelib.mkdir(parents=True, exist_ok=True)
+    (purelib / "samvada-bundle.pth").write_text(
+        Path(os.path.relpath(stage / "lib", purelib)).as_posix() + "\n", encoding="utf-8")
     launcher = launcher_of(stage)
     if WINDOWS:
         launcher.write_text(LAUNCHER_CMD.replace("\n", "\r\n"), newline="", encoding="utf-8")
+        (stage / "bin" / "samvada").write_text(LAUNCHER_SH_WINDOWS, newline="\n", encoding="utf-8")
     else:
         launcher.write_text(LAUNCHER_SH, encoding="utf-8")
         launcher.chmod(0o755)
@@ -254,6 +273,37 @@ def check_clips(out: Path, langs: list[str], ok: bool) -> int:
     return 0 if ok else 1
 
 
+def git_bash() -> Path | None:
+    """Git for Windows' bash (where Claude Code runs commands); never System32's, which is WSL."""
+    bash = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
+    return bash if WINDOWS and bash.is_file() else None
+
+
+def agent_paths(folder: Path, langs: list[str], env: dict) -> subprocess.CompletedProcess:
+    """The ways an agent reaches the bundle: its hooks run the bundle's python with no launcher
+    (so nothing sets PYTHONPATH or the folders), and on Windows its commands run in Git Bash,
+    which must find `samvada` by name."""
+    r = subprocess.run([str(python_exe(folder / "python")), "-s", "-m", "samvada", "voices",
+                        "verify", *langs], env=env)
+    print(f"bundle test: python -m samvada, no launcher: exit {r.returncode}")
+    bash = git_bash()
+    if r.returncode == 0 and bash:
+        r = subprocess.run([str(bash), "-c", 'PATH="$(cygpath -u "$1"):$PATH"; shift; '
+                            'samvada voices verify "$@"', "sh", str(folder / "bin"), *langs], env=env)
+        print(f"bundle test: samvada by name in Git Bash: exit {r.returncode}")
+    if r.returncode == 0:  # setup's plan reads the real PATH (Windows: the registry), changes nothing
+        home = Path(env["HOME"])
+        r = subprocess.run([str(launcher_of(folder)), "setup", "--dry-run", "--no-call"],
+                           env={**env, "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+                                "XDG_CONFIG_HOME": str(home / "config"), "XDG_BIN_HOME": str(home / "bin")},
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        plan = [l for l in r.stdout.splitlines() if l.strip().startswith("path")]
+        print(f"bundle test: setup --dry-run: exit {r.returncode}; " + (" | ".join(plan) or "no path step"))
+        if r.returncode == 0 and not plan:
+            r = subprocess.CompletedProcess(r.args, 1)
+    return r
+
+
 def test(archive: Path, langs: list[str], work: Path, local: bool) -> int:
     where = work / f"test-{time.strftime('%Y%m%d-%H%M%S')}"
     where.mkdir(parents=True)
@@ -272,6 +322,8 @@ def test(archive: Path, langs: list[str], work: Path, local: bool) -> int:
                "-e", "HOME=/tmp", "debian:testing",
                "sh", "-c", 'command -v python3 && echo "python3 found: not a clean machine" && exit 9; '
                            '/opt/samvada/bin/samvada voices verify && '
+                           # an agent's hook: the bundle's python, no launcher, no folders set
+                           '/opt/samvada/python/bin/python3 -s -m samvada voices verify && '
                            '/opt/samvada/bin/samvada speak --save /out "$@"', "sh", *pairs]
         t0 = time.perf_counter()
         r = subprocess.run(cmd)
@@ -295,6 +347,7 @@ def test(archive: Path, langs: list[str], work: Path, local: bool) -> int:
     # platform.machine() is the OS's (Windows asks WMI); sysconfig is what python.exe was built for
     print(f"bundle test: the bundle's Python: {seen}")
     r1 = subprocess.run([str(launcher), "voices", "verify", *langs], env=env)
+    r1 = agent_paths(folder, langs, env) if r1.returncode == 0 else r1
     t0 = time.perf_counter()
     r2 = subprocess.run([str(launcher), "speak", "--save", str(out), *pairs], env=env)
     took = time.perf_counter() - t0

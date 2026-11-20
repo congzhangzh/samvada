@@ -15,10 +15,14 @@ Prints the plan first (`--dry-run` stops there), then changes only what differs:
             shell alias: an agent's shell never reads ~/.bashrc). A `speak` that is not ours
             (espeak-ng-espeak's /usr/bin/speak, an older wrapper) is left alone, unless
             --speak-alias=replace, which keeps it beside as a backup.
+  6. path   a standalone bundle goes on PATH, so the agent runs `samvada` by name (--no-path:
+            not): on Windows its bin folder in the user's PATH (a new terminal sees it), else a
+            link ~/.local/bin/samvada ($XDG_BIN_HOME) to its launcher; a `samvada` there that is
+            not ours is left alone. An install by pip or uv is on PATH already; a note if not.
 
 Before a file is changed, a copy is kept beside it (<name>.samvada-backup-<time>).
-`--uninstall` removes exactly the block, the skill, the hooks and the alias it added (and puts
-back a `speak` that --speak-alias=replace had set aside).
+`--uninstall` removes exactly the block, the skill, the hooks, the alias and the PATH entry it
+added (and puts back a `speak` that --speak-alias=replace had set aside).
 """
 
 from __future__ import annotations
@@ -61,6 +65,7 @@ class Tutor:
     speak_alias: bool = False
     table: bool = False  # the table of the message in every language (and its IPA row): opt-in
     call: str | None = None  # the owner's name for the agent: None = never asked, "" = none
+    path: bool = True  # a standalone bundle goes on PATH (step 6)
 
 
 def locale_lang(env: Mapping[str, str] = os.environ) -> str:
@@ -99,7 +104,7 @@ def load_tutor(env: Mapping[str, str] = os.environ) -> Tutor:
     # a tutor.toml from before the table was opt-in (2026-11-19) had the table: an upgrade keeps it
     return Tutor(d.get("native", t.native), tuple(d.get("langs", t.langs)), bool(d.get("ipa", True)),
                  bool(d.get("speak_alias", False)), bool(d.get("table", True)),
-                 str(d["call"]) if "call" in d else None)
+                 str(d["call"]) if "call" in d else None, bool(d.get("path", True)))
 
 
 def save_tutor(t: Tutor, env: Mapping[str, str] = os.environ) -> None:
@@ -110,6 +115,7 @@ def save_tutor(t: Tutor, env: Mapping[str, str] = os.environ) -> None:
                  f"langs = [{langs}]\nipa = {'true' if t.ipa else 'false'}\n"
                  f"speak_alias = {'true' if t.speak_alias else 'false'}\n"
                  f"table = {'true' if t.table else 'false'}\n"
+                 f"path = {'true' if t.path else 'false'}\n"
                  + ("" if t.call is None else f"call = {json.dumps(t.call, ensure_ascii=False)}\n"),
                  encoding="utf-8")
 
@@ -184,7 +190,103 @@ def bin_dir(env: Mapping[str, str] = os.environ) -> Path:
     if env.get("SAMVADA_BIN_DIR"):
         return Path(env["SAMVADA_BIN_DIR"])
     found = shutil.which("samvada", path=env.get("PATH"))
-    return Path(found).parent if found else Path(sys.executable).parent
+    if found:
+        return Path(found).parent
+    bundle = paths.bundle_root()  # its python/ holds no samvada; bin/ does
+    return bundle / "bin" if bundle else Path(sys.executable).parent
+
+
+def _on_path(env: Mapping[str, str]) -> bool:
+    """Whether the agent can run `samvada` by name. On Windows the bare name must be samvada.exe
+    or samvada itself: Git Bash, the shell Claude Code runs commands in, never tries .cmd."""
+    names = ("samvada", "samvada.exe") if sys.platform == "win32" else ("samvada",)
+    return any(d and any(Path(d, n).is_file() for n in names)
+               for d in (env.get("PATH") or "").split(os.pathsep))
+
+
+def _win_user_path() -> tuple[str, int]:
+    """The user's own PATH (HKCU\\Environment), as written, and its registry type."""
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+        try:
+            value, kind = winreg.QueryValueEx(k, "Path")
+            return str(value), kind
+        except FileNotFoundError:
+            return "", winreg.REG_EXPAND_SZ
+
+
+def _win_set_user_path(value: str, kind: int) -> None:
+    import ctypes
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as k:
+        winreg.SetValueEx(k, "Path", 0, kind, value)
+    # WM_SETTINGCHANGE "Environment" to every window: Explorer, then each new terminal, sees it
+    ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x1A, 0, "Environment", 0x2, 5000, None)
+
+
+def _same_dir(a: str, b: Path) -> bool:
+    return os.path.normcase(a.strip().rstrip("\\/")) == os.path.normcase(str(b).rstrip("\\/"))
+
+
+def _win_path_steps(bin_: Path, t: Tutor, uninstall: bool, env: Mapping[str, str]) -> list[Step]:
+    value, kind = _win_user_path()
+    parts = [x for x in value.split(";") if x.strip()]
+    has = any(_same_dir(x, bin_) for x in parts)
+    if uninstall or not t.path:
+        if not has:
+            return []
+        keep = ";".join(x for x in parts if not _same_dir(x, bin_))
+        return [Step("path", f"take {bin_} out of your user PATH", lambda: _win_set_user_path(keep, kind))]
+    if has:
+        return [Step("path", f"{bin_} is on your user PATH")]
+    new = ";".join([*parts, str(bin_)])
+    return [Step("path", f"add {bin_} to your user PATH, so the agent runs `samvada` by name "
+                         "(a new terminal sees it: restart the agent)", lambda: _win_set_user_path(new, kind))]
+
+
+def link_dir(env: Mapping[str, str] = os.environ) -> Path:
+    return Path(env["XDG_BIN_HOME"]) if env.get("XDG_BIN_HOME") else Path.home() / ".local" / "bin"
+
+
+def _posix_path_steps(launcher: Path, t: Tutor, uninstall: bool, env: Mapping[str, str]) -> list[Step]:
+    link = link_dir(env) / "samvada"
+    target = Path(os.readlink(link)) if link.is_symlink() else None
+    ours = target == launcher
+    # a link to another bundle's launcher (an older version), or to one that is gone: ours to move
+    old_bundle = target is not None and not ours and target.name == "samvada" \
+        and target.parent.name == "bin" and ((target.parents[1] / "BUNDLE.json").is_file()
+                                             or not target.exists())
+    if uninstall or not t.path:
+        return [Step("path", f"remove the link {link}", link.unlink)] if ours else []
+    if ours:
+        steps = [Step("path", f"{link} runs this bundle")]
+    elif (link.exists() or link.is_symlink()) and not old_bundle:
+        return [Step("path", f"{link} is another samvada: left alone (the agent runs that one)")]
+    else:
+        def make():
+            link.parent.mkdir(parents=True, exist_ok=True)
+            if link.is_symlink():
+                link.unlink()
+            link.symlink_to(launcher)
+        verb = f"move the link {link} from {target}" if old_bundle else f"link {link}"
+        steps = [Step("path", f"{verb} to {launcher}, so the agent runs `samvada` by name", make)]
+    if not any(d and _same_dir(d, link.parent) for d in (env.get("PATH") or "").split(os.pathsep)):
+        steps.append(Step("path", f"note: {link.parent} is not on PATH: add it"))
+    return steps
+
+
+def _path_steps(t: Tutor, uninstall: bool, env: Mapping[str, str]) -> list[Step]:
+    """Step 6: a standalone bundle goes on PATH (the rule has the agent run `samvada speak` by
+    name); an install by pip or uv is there already, and gets a note if it is not."""
+    bundle = paths.bundle_root()
+    if bundle is None:
+        if uninstall or _on_path(env):
+            return []
+        return [Step("path", f"note: `samvada` is not on PATH, and the agent runs `samvada speak`: "
+                             f"add {bin_dir(env)} to PATH")]
+    if sys.platform == "win32":
+        return _win_path_steps(bundle / "bin", t, uninstall, env)
+    return _posix_path_steps(bundle / "bin" / "samvada", t, uninstall, env)
 
 
 def alias_text() -> str:
@@ -400,6 +502,9 @@ def plan(agent: str, t: Tutor, uninstall: bool, env: Mapping[str, str] = os.envi
 
     # 5. the speak alias
     steps += _alias_steps(t, uninstall, replace, env)
+
+    # 6. the agent can find samvada
+    steps += _path_steps(t, uninstall, env)
     return steps
 
 
@@ -436,6 +541,8 @@ def main(args: list[str], env: Mapping[str, str] = os.environ, ask=_ask_call) ->
             t.call = next(it, "").strip()
         elif a == "--no-call":
             t.call = ""
+        elif a in ("--path", "--no-path"):
+            t.path = a == "--path"
         elif a in ("--speak-alias", "--speak-alias=replace", "--no-speak-alias"):
             t.speak_alias = a != "--no-speak-alias"
             replace = a == "--speak-alias=replace"

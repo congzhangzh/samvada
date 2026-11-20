@@ -313,8 +313,8 @@ jobs:
           keeps its own terms (VOICES.md, or the README inside its wheel).
 
           Standalone bundles: their own Python, both engines and the English, Chinese, Japanese
-          and French voices; no network needed. Unpack, then run bin/samvada (Windows:
-          bin\\samvada.cmd).
+          and French voices; no network needed. Unpack, then run bin/samvada setup (Windows:
+          bin\\samvada.cmd setup): it puts the bundle on PATH for your agent (--no-path: not).
           linux-x86_64, linux-arm64, macos-arm64 (macOS 14+), windows-x86_64, windows-arm64
           (native). VOICES.md inside lists each voice's
           source; each voice keeps its own license.
